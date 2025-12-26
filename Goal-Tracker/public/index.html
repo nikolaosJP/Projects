@@ -239,13 +239,15 @@
         const GoalTracker = () => {
           const [activeList, setActiveList] = useState('today');
           const [activeView, setActiveView] = useState('list');
-          const [calendarView, setCalendarView] = useState('month');
+          const [calendarView, setCalendarView] = useState('week');
           const [newGoalText, setNewGoalText] = useState('');
           const [showAddTask, setShowAddTask] = useState(false);
           const [selectedCategory, setSelectedCategory] = useState('health');
           const [selectedTimeframe, setSelectedTimeframe] = useState('daily');
-          const [selectedTime, setSelectedTime] = useState('09:00');
-          const [isRecurring, setIsRecurring] = useState(false);
+          const [selectedStartTime, setSelectedStartTime] = useState('09:00');
+          const [selectedEndTime, setSelectedEndTime] = useState('10:00');
+          const [selectedStartDate, setSelectedStartDate] = useState('');
+          const [selectedEndDate, setSelectedEndDate] = useState('');
           const [currentDate, setCurrentDate] = useState(new Date());
           const [showListManager, setShowListManager] = useState(false);
           const [editingList, setEditingList] = useState(null);
@@ -258,12 +260,11 @@
           const [statsCategoryFilter, setStatsCategoryFilter] = useState('all');
           const [statsTimePeriod, setStatsTimePeriod] = useState('week'); // week, month, year, all
           const [targetCompletions, setTargetCompletions] = useState(0);
+          const [currentCompletions, setCurrentCompletions] = useState(0);
           const [notes, setNotes] = useState([]);
           const [newNoteText, setNewNoteText] = useState('');
           const [newNoteTitle, setNewNoteTitle] = useState('');
           const [showAddNote, setShowAddNote] = useState(false);
-          const [startDateTime, setStartDateTime] = useState('');
-          const [endDateTime, setEndDateTime] = useState('');
           const [isReminder, setIsReminder] = useState(false);
           const [selectedNoteId, setSelectedNoteId] = useState(null);
           const [saveStatus, setSaveStatus] = useState('');
@@ -316,6 +317,9 @@
           ]);
 
           const [customCategories, setCustomCategories] = useState([]);
+          
+          // Category order for reordering in sidebar
+          const [categoryOrder, setCategoryOrder] = useState([]);
 
           // Start with empty goals - clean slate for user's real data
           const [goals, setGoals] = useState({
@@ -363,6 +367,11 @@
             if (savedNotes) {
               setNotes(JSON.parse(savedNotes));
             }
+            
+            const savedCategoryOrder = localStorage.getItem('goalTrackerCategoryOrder');
+            if (savedCategoryOrder) {
+              setCategoryOrder(JSON.parse(savedCategoryOrder));
+            }
 
             // Then load from server (will override localStorage data)
             loadDataFromServer();
@@ -381,10 +390,62 @@
           }, [customCategories]);
 
           useEffect(() => {
+            localStorage.setItem('goalTrackerCategoryOrder', JSON.stringify(categoryOrder));
+          }, [categoryOrder]);
+
+          useEffect(() => {
             localStorage.setItem('goalTrackerNotes', JSON.stringify(notes));
           }, [notes]);
 
-          const categories = [...defaultCategories, ...customCategories];
+          // Combine and sort categories based on order
+          const categories = (() => {
+            const allCats = [...defaultCategories, ...customCategories];
+            if (categoryOrder.length === 0) return allCats;
+            
+            // Sort based on order, put unknown categories at the end
+            return allCats.sort((a, b) => {
+              const indexA = categoryOrder.indexOf(a.id);
+              const indexB = categoryOrder.indexOf(b.id);
+              if (indexA === -1 && indexB === -1) return 0;
+              if (indexA === -1) return 1;
+              if (indexB === -1) return -1;
+              return indexA - indexB;
+            });
+          })();
+          
+          // Move category up in the list
+          const moveCategoryUp = (categoryId) => {
+            const allCatIds = categories.map(c => c.id);
+            const currentOrder = categoryOrder.length > 0 ? [...categoryOrder] : allCatIds;
+            
+            // Ensure all categories are in the order
+            allCatIds.forEach(id => {
+              if (!currentOrder.includes(id)) currentOrder.push(id);
+            });
+            
+            const index = currentOrder.indexOf(categoryId);
+            if (index > 0) {
+              [currentOrder[index - 1], currentOrder[index]] = [currentOrder[index], currentOrder[index - 1]];
+              setCategoryOrder([...currentOrder]);
+            }
+          };
+          
+          // Move category down in the list
+          const moveCategoryDown = (categoryId) => {
+            const allCatIds = categories.map(c => c.id);
+            const currentOrder = categoryOrder.length > 0 ? [...categoryOrder] : allCatIds;
+            
+            // Ensure all categories are in the order
+            allCatIds.forEach(id => {
+              if (!currentOrder.includes(id)) currentOrder.push(id);
+            });
+            
+            const index = currentOrder.indexOf(categoryId);
+            if (index < currentOrder.length - 1) {
+              [currentOrder[index], currentOrder[index + 1]] = [currentOrder[index + 1], currentOrder[index]];
+              setCategoryOrder([...currentOrder]);
+            }
+          };
 
           const addCustomCategory = () => {
             if (newListName.trim()) {
@@ -479,47 +540,106 @@
             }
 
             if (newGoalText.trim()) {
+              // Build startDateTime and endDateTime from separate date and time fields
+              const today = new Date().toISOString().split('T')[0];
+              const startDateToUse = selectedStartDate || today;
+              const endDateToUse = selectedEndDate || startDateToUse;
+              
+              const computedStartDateTime = `${startDateToUse}T${selectedStartTime}`;
+              const computedEndDateTime = `${endDateToUse}T${selectedEndTime}`;
+
               // If editing an existing goal, update it
               if (editingGoalId && editingGoalTimeframe) {
-                setGoals(prev => ({
-                  ...prev,
-                  [editingGoalTimeframe]: prev[editingGoalTimeframe].map(goal => {
-                    if (goal.id === editingGoalId) {
-                      return {
-                        ...goal,
-                        text: newGoalText,
-                        time: selectedTime,
-                        category: selectedCategory,
-                        timeframe: selectedTimeframe,
-                        recurring: isRecurring,
-                        targetCompletions: targetCompletions > 0 ? targetCompletions : null,
-                        startDateTime: startDateTime || null,
-                        endDateTime: endDateTime || null,
-                        isReminder: isReminder
-                      };
+                const updatedGoal = {
+                  text: newGoalText,
+                  time: selectedStartTime,
+                  category: selectedCategory,
+                  timeframe: selectedTimeframe,
+                  targetCompletions: targetCompletions > 0 ? targetCompletions : null,
+                  startDateTime: computedStartDateTime,
+                  endDateTime: computedEndDateTime,
+                  isReminder: isReminder
+                };
+                
+                // Function to adjust completedDates based on currentCompletions
+                const adjustCompletedDates = (goal) => {
+                  const periodStart = getTimeframePeriodStart(selectedTimeframe);
+                  const existingDates = goal.completedDates || [];
+                  const datesBeforePeriod = existingDates.filter(d => d < periodStart);
+                  const datesInPeriod = existingDates.filter(d => d >= periodStart);
+                  
+                  const targetCount = Math.max(0, currentCompletions);
+                  const currentCount = datesInPeriod.length;
+                  
+                  let newPeriodDates = [...datesInPeriod];
+                  
+                  if (targetCount > currentCount) {
+                    // Need to add more dates (use today)
+                    const today = new Date().toISOString().split('T')[0];
+                    for (let i = 0; i < targetCount - currentCount; i++) {
+                      newPeriodDates.push(today);
                     }
-                    return goal;
-                  })
-                }));
+                  } else if (targetCount < currentCount) {
+                    // Need to remove dates (remove from the end)
+                    newPeriodDates = newPeriodDates.slice(0, targetCount);
+                  }
+                  
+                  // Update completed status
+                  const isNowCompleted = targetCompletions > 0 
+                    ? newPeriodDates.length >= targetCompletions
+                    : newPeriodDates.length > 0;
+                  
+                  return {
+                    completedDates: [...datesBeforePeriod, ...newPeriodDates],
+                    completed: isNowCompleted
+                  };
+                };
+                
+                // Check if timeframe changed - if so, move to new timeframe
+                if (editingGoalTimeframe !== selectedTimeframe) {
+                  // Remove from old timeframe, add to new timeframe
+                  setGoals(prev => {
+                    const oldGoal = prev[editingGoalTimeframe].find(g => g.id === editingGoalId);
+                    const dateAdjustments = adjustCompletedDates(oldGoal);
+                    const movedGoal = { ...oldGoal, ...updatedGoal, ...dateAdjustments };
+                    return {
+                      ...prev,
+                      [editingGoalTimeframe]: prev[editingGoalTimeframe].filter(g => g.id !== editingGoalId),
+                      [selectedTimeframe]: [...(prev[selectedTimeframe] || []), movedGoal]
+                    };
+                  });
+                } else {
+                  // Same timeframe, just update in place
+                  setGoals(prev => ({
+                    ...prev,
+                    [editingGoalTimeframe]: prev[editingGoalTimeframe].map(goal => {
+                      if (goal.id === editingGoalId) {
+                        const dateAdjustments = adjustCompletedDates(goal);
+                        return { ...goal, ...updatedGoal, ...dateAdjustments };
+                      }
+                      return goal;
+                    })
+                  }));
+                }
 
                 // Reset editing state
                 setEditingGoalId(null);
                 setEditingGoalTimeframe(null);
+                setCurrentCompletions(0);
               } else {
                 // Adding a new goal
                 const newGoal = {
                   id: Date.now(),
                   text: newGoalText,
-                  time: selectedTime,
+                  time: selectedStartTime,
                   completed: false,
                   category: selectedCategory,
                   priority: 0,
                   timeframe: selectedTimeframe,
-                  recurring: isRecurring,
                   completedDates: [],
                   targetCompletions: targetCompletions > 0 ? targetCompletions : null,
-                  startDateTime: startDateTime || null,
-                  endDateTime: endDateTime || null,
+                  startDateTime: computedStartDateTime,
+                  endDateTime: computedEndDateTime,
                   isReminder: isReminder
                 };
 
@@ -531,10 +651,9 @@
 
               setNewGoalText('');
               setShowAddTask(false);
-              setIsRecurring(false);
               setTargetCompletions(0);
-              setStartDateTime('');
-              setEndDateTime('');
+              setSelectedStartDate('');
+              setSelectedEndDate('');
               setIsReminder(false);
             }
           };
@@ -545,12 +664,64 @@
               ...prev,
               [timeframe]: prev[timeframe].map(goal => {
                 if (goal.id === goalId) {
-                  const newCompleted = !goal.completed;
                   const currentDates = goal.completedDates || [];
+                  
+                  // If task has target completions, always add a completion (increment)
+                  if (goal.targetCompletions && goal.targetCompletions > 0) {
+                    const newDates = [...currentDates, today];
+                    // Check if now completed based on period
+                    const periodStart = getTimeframePeriodStart(goal.timeframe);
+                    const completionsInPeriod = newDates.filter(d => d >= periodStart).length;
+                    const newCompleted = completionsInPeriod >= goal.targetCompletions;
+                    return { ...goal, completed: newCompleted, completedDates: newDates };
+                  }
+                  
+                  // No target - simple toggle
+                  const newCompleted = !goal.completed;
                   const newDates = newCompleted 
                     ? [...currentDates, today]
                     : currentDates.filter(d => d !== today);
                   return { ...goal, completed: newCompleted, completedDates: newDates };
+                }
+                return goal;
+              })
+            }));
+          };
+          
+          // Decrement completion count for tasks with targets
+          const decrementGoal = (goalId, timeframe) => {
+            const today = new Date().toISOString().split('T')[0];
+            setGoals(prev => ({
+              ...prev,
+              [timeframe]: prev[timeframe].map(goal => {
+                if (goal.id === goalId) {
+                  const currentDates = goal.completedDates || [];
+                  
+                  // Find and remove the most recent completion from today in the current period
+                  const periodStart = getTimeframePeriodStart(goal.timeframe);
+                  const periodDates = currentDates.filter(d => d >= periodStart);
+                  
+                  if (periodDates.length > 0) {
+                    // Remove the last completion from the period (preferring today's date)
+                    const todayIndex = currentDates.lastIndexOf(today);
+                    let newDates;
+                    if (todayIndex >= 0) {
+                      newDates = [...currentDates.slice(0, todayIndex), ...currentDates.slice(todayIndex + 1)];
+                    } else {
+                      // Remove the last date in the period
+                      const lastPeriodDate = periodDates[periodDates.length - 1];
+                      const lastIndex = currentDates.lastIndexOf(lastPeriodDate);
+                      newDates = [...currentDates.slice(0, lastIndex), ...currentDates.slice(lastIndex + 1)];
+                    }
+                    
+                    // Update completed status
+                    const completionsInPeriod = newDates.filter(d => d >= periodStart).length;
+                    const newCompleted = goal.targetCompletions 
+                      ? completionsInPeriod >= goal.targetCompletions
+                      : newDates.includes(today);
+                    
+                    return { ...goal, completed: newCompleted, completedDates: newDates };
+                  }
                 }
                 return goal;
               })
@@ -568,14 +739,35 @@
             setEditingGoalId(goal.id);
             setEditingGoalTimeframe(timeframe);
             setNewGoalText(goal.text);
-            setSelectedTime(goal.time || '09:00');
             setSelectedCategory(goal.category);
             setSelectedTimeframe(timeframe);
-            setIsRecurring(goal.recurring || false);
             setTargetCompletions(goal.targetCompletions || 0);
-            setStartDateTime(goal.startDateTime || '');
-            setEndDateTime(goal.endDateTime || '');
             setIsReminder(goal.isReminder || false);
+            
+            // Calculate current completions in period
+            const periodStart = getTimeframePeriodStart(timeframe);
+            const completionsInPeriod = (goal.completedDates || []).filter(d => d >= periodStart).length;
+            setCurrentCompletions(completionsInPeriod);
+            
+            // Parse startDateTime and endDateTime into separate date and time fields
+            if (goal.startDateTime) {
+              const startParts = goal.startDateTime.split('T');
+              setSelectedStartDate(startParts[0] || '');
+              setSelectedStartTime(startParts[1]?.substring(0, 5) || goal.time || '09:00');
+            } else {
+              setSelectedStartDate('');
+              setSelectedStartTime(goal.time || '09:00');
+            }
+            
+            if (goal.endDateTime) {
+              const endParts = goal.endDateTime.split('T');
+              setSelectedEndDate(endParts[0] || '');
+              setSelectedEndTime(endParts[1]?.substring(0, 5) || '10:00');
+            } else {
+              setSelectedEndDate('');
+              setSelectedEndTime('10:00');
+            }
+            
             setShowAddTask(true);
             setActiveView('list');
             // Scroll to top so user can see the edit form (after DOM updates)
@@ -640,14 +832,16 @@
               const actualStart = startDate <= endDate ? calendarDragStart : calendarDragEnd;
               const actualEnd = startDate <= endDate ? calendarDragEnd : calendarDragStart;
 
-              // Format datetime-local strings
+              // Set separate date and time fields
               const startDateStr = new Date(actualStart.date).toISOString().split('T')[0];
               const endDateStr = new Date(actualEnd.date).toISOString().split('T')[0];
               const startTimeStr = actualStart.hour.toString().padStart(2, '0') + ':00';
               const endTimeStr = actualEnd.hour.toString().padStart(2, '0') + ':59';
 
-              setStartDateTime(`${startDateStr}T${startTimeStr}`);
-              setEndDateTime(`${endDateStr}T${endTimeStr}`);
+              setSelectedStartDate(startDateStr);
+              setSelectedEndDate(endDateStr);
+              setSelectedStartTime(startTimeStr);
+              setSelectedEndTime(endTimeStr);
               setShowAddTask(true);
               setActiveView('list');
 
@@ -682,6 +876,7 @@
                   icon: undefined,
                   iconName: cat.iconName
                 })),
+                categoryOrder,
                 lastSaved: new Date().toISOString()
               };
 
@@ -774,6 +969,9 @@
                   });
                   setCustomCategories(reconstructed);
                 }
+                if (data && data.categoryOrder && Array.isArray(data.categoryOrder)) {
+                  setCategoryOrder(data.categoryOrder);
+                }
               }
             } catch (error) {
               console.error('Error loading data:', error);
@@ -798,6 +996,54 @@
             });
             return allGoalsArray;
           };
+          
+          // Get the start date of the current period based on timeframe
+          const getTimeframePeriodStart = (timeframe) => {
+            const now = new Date();
+            switch (timeframe) {
+              case 'daily':
+                return now.toISOString().split('T')[0];
+              case 'weekly':
+                // Get Monday of this week
+                const dayOfWeek = (now.getDay() + 6) % 7; // 0 = Monday
+                const monday = new Date(now);
+                monday.setDate(now.getDate() - dayOfWeek);
+                return monday.toISOString().split('T')[0];
+              case 'monthly':
+                return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+              case 'annual':
+                return `${now.getFullYear()}-01-01`;
+              default:
+                return now.toISOString().split('T')[0];
+            }
+          };
+          
+          // Check if a goal is completed within its current timeframe period
+          const isGoalCompletedInPeriod = (goal) => {
+            if (!goal.targetCompletions || goal.targetCompletions <= 0) {
+              // No target - use the simple completed flag
+              return goal.completed;
+            }
+            
+            // Has target completions - count completions within current period
+            const periodStart = getTimeframePeriodStart(goal.timeframe);
+            const completionsInPeriod = (goal.completedDates || []).filter(date => date >= periodStart).length;
+            
+            return completionsInPeriod >= goal.targetCompletions;
+          };
+          
+          // Get completion progress for a goal (for display)
+          const getGoalProgress = (goal) => {
+            if (!goal.targetCompletions || goal.targetCompletions <= 0) {
+              return { current: goal.completed ? 1 : 0, target: 1, percentage: goal.completed ? 100 : 0 };
+            }
+            
+            const periodStart = getTimeframePeriodStart(goal.timeframe);
+            const completionsInPeriod = (goal.completedDates || []).filter(date => date >= periodStart).length;
+            const percentage = Math.min(Math.round((completionsInPeriod / goal.targetCompletions) * 100), 100);
+            
+            return { current: completionsInPeriod, target: goal.targetCompletions, percentage };
+          };
 
           const getDisplayGoals = () => {
             const allGoals = getAllGoals();
@@ -805,8 +1051,8 @@
             if (activeList === 'today') {
               return [...(goals.daily || []), ...(goals.weekly || []).slice(0, 3), ...(goals.monthly || []).slice(0, 1)];
             } else if (activeList === 'completed') {
-              // Show all completed goals from all timeframes
-              return allGoals.filter(g => g.completed);
+              // Show all completed goals from all timeframes (using period-based completion)
+              return allGoals.filter(g => isGoalCompletedInPeriod(g));
             } else if (['daily', 'weekly', 'monthly', 'annual'].includes(activeList)) {
               return goals[activeList] || [];
             } else {
@@ -824,6 +1070,18 @@
               [timeframe]: (prev[timeframe] || []).map(goal => {
                 if (goal.id === goalId) {
                   const currentDates = goal.completedDates || [];
+                  
+                  // If task has target completions, always add a completion (increment)
+                  if (goal.targetCompletions && goal.targetCompletions > 0) {
+                    const newDates = [...currentDates, dateStr];
+                    // Check if now completed based on period
+                    const periodStart = getTimeframePeriodStart(goal.timeframe);
+                    const completionsInPeriod = newDates.filter(d => d >= periodStart).length;
+                    const newCompleted = completionsInPeriod >= goal.targetCompletions;
+                    return { ...goal, completed: newCompleted, completedDates: newDates };
+                  }
+                  
+                  // No target - simple toggle
                   const hasDate = currentDates.includes(dateStr);
                   const newDates = hasDate
                     ? currentDates.filter(d => d !== dateStr)
@@ -844,22 +1102,35 @@
 
           const addGoalToDate = (date) => {
             setSelectedDateForTask(date);
+            setSelectedStartDate(date.toISOString().split('T')[0]);
+            setSelectedEndDate(date.toISOString().split('T')[0]);
             setShowAddTask(true);
             setActiveView('list'); // Switch to list view so the form is visible
           };
 
           const addGoalWithDate = () => {
             if (newGoalText.trim()) {
+              // Use the selected date from calendar, or today, or the date fields
+              const taskDate = selectedDateForTask 
+                ? selectedDateForTask.toISOString().split('T')[0]
+                : (selectedStartDate || new Date().toISOString().split('T')[0]);
+              const endDate = selectedEndDate || taskDate;
+              
+              const computedStartDateTime = `${taskDate}T${selectedStartTime}`;
+              const computedEndDateTime = `${endDate}T${selectedEndTime}`;
+              
               const newGoal = {
                 id: Date.now(),
                 text: newGoalText,
-                time: selectedTime,
+                time: selectedStartTime,
                 completed: false,
                 category: selectedCategory,
                 priority: 0,
                 timeframe: selectedTimeframe,
-                recurring: isRecurring,
-                completedDates: selectedDateForTask ? [selectedDateForTask.toISOString().split('T')[0]] : []
+                completedDates: selectedDateForTask ? [selectedDateForTask.toISOString().split('T')[0]] : [],
+                startDateTime: computedStartDateTime,
+                endDateTime: computedEndDateTime,
+                isReminder: isReminder
               };
               
               setGoals(prev => ({
@@ -869,19 +1140,17 @@
               
               setNewGoalText('');
               setShowAddTask(false);
-              setIsRecurring(false);
               setSelectedDateForTask(null);
+              setSelectedStartDate('');
+              setSelectedEndDate('');
             }
           };
 
           const getGoalsForDate = (date) => {
             const dateStr = date.toISOString().split('T')[0];
-            const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+            const dayOfWeek = (date.getDay() + 6) % 7; // 0 = Monday, 6 = Sunday
 
             return getAllGoals().filter(goal => {
-              // Exclude reminders from calendar view
-              if (goal.isReminder) return false;
-
               // Show daily goals every day
               if (goal.timeframe === 'daily') return true;
               
@@ -911,16 +1180,16 @@
 
           const getListCount = (listId) => {
             if (listId === 'today') {
-              return (goals.daily || []).filter(g => !g.completed).length;
+              return (goals.daily || []).filter(g => !isGoalCompletedInPeriod(g)).length;
             } else if (['daily', 'weekly', 'monthly', 'annual'].includes(listId)) {
-              return (goals[listId] || []).filter(g => !g.completed).length;
+              return (goals[listId] || []).filter(g => !isGoalCompletedInPeriod(g)).length;
             }
             return 0;
           };
 
           const getCategoryCount = (categoryId) => {
             const allGoals = getAllGoals();
-            return allGoals.filter(g => g.category === categoryId && !g.completed).length;
+            return allGoals.filter(g => g.category === categoryId && !isGoalCompletedInPeriod(g)).length;
           };
 
           const getCategoryForGoal = (categoryId) => {
@@ -933,7 +1202,8 @@
             const firstDay = new Date(year, month, 1);
             const lastDay = new Date(year, month + 1, 0);
             const daysInMonth = lastDay.getDate();
-            const startingDayOfWeek = firstDay.getDay();
+            // Convert Sunday=0 to Monday=0 format: (day + 6) % 7
+            const startingDayOfWeek = (firstDay.getDay() + 6) % 7;
             
             return { daysInMonth, startingDayOfWeek, year, month };
           };
@@ -941,7 +1211,9 @@
           const getWeekDays = () => {
             const days = [];
             const startOfWeek = new Date(currentDate);
-            startOfWeek.setDate(currentDate.getDate() - currentDate.getDay());
+            // Start from Monday: (day + 6) % 7 gives Monday=0
+            const dayOffset = (currentDate.getDay() + 6) % 7;
+            startOfWeek.setDate(currentDate.getDate() - dayOffset);
             
             for (let i = 0; i < 7; i++) {
               const day = new Date(startOfWeek);
@@ -1008,15 +1280,15 @@
           const getCompletionRate = () => {
             const allGoals = getAllGoals();
             if (allGoals.length === 0) return 0;
-            return Math.round((allGoals.filter(g => g.completed).length / allGoals.length) * 100);
+            return Math.round((allGoals.filter(g => isGoalCompletedInPeriod(g)).length / allGoals.length) * 100);
           };
 
           const getTimeframeStats = () => {
             return [
-              { name: 'Daily', total: (goals.daily || []).length, completed: (goals.daily || []).filter(g => g.completed).length },
-              { name: 'Weekly', total: (goals.weekly || []).length, completed: (goals.weekly || []).filter(g => g.completed).length },
-              { name: 'Monthly', total: (goals.monthly || []).length, completed: (goals.monthly || []).filter(g => g.completed).length },
-              { name: 'Annual', total: (goals.annual || []).length, completed: (goals.annual || []).filter(g => g.completed).length }
+              { name: 'Daily', total: (goals.daily || []).length, completed: (goals.daily || []).filter(g => isGoalCompletedInPeriod(g)).length },
+              { name: 'Weekly', total: (goals.weekly || []).length, completed: (goals.weekly || []).filter(g => isGoalCompletedInPeriod(g)).length },
+              { name: 'Monthly', total: (goals.monthly || []).length, completed: (goals.monthly || []).filter(g => isGoalCompletedInPeriod(g)).length },
+              { name: 'Annual', total: (goals.annual || []).length, completed: (goals.annual || []).filter(g => isGoalCompletedInPeriod(g)).length }
             ];
           };
 
@@ -1024,7 +1296,7 @@
             return categories.map(cat => {
               const allGoals = getAllGoals();
               const categoryGoals = allGoals.filter(g => g.category === cat.id);
-              const completed = categoryGoals.filter(g => g.completed).length;
+              const completed = categoryGoals.filter(g => isGoalCompletedInPeriod(g)).length;
               const total = categoryGoals.length;
               const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
               
@@ -1045,9 +1317,9 @@
             const high = allGoals.filter(g => g.priority === 2);
             
             return [
-              { priority: 'Low', total: low.length, completed: low.filter(g => g.completed).length },
-              { priority: 'Medium', total: medium.length, completed: medium.filter(g => g.completed).length },
-              { priority: 'High', total: high.length, completed: high.filter(g => g.completed).length }
+              { priority: 'Low', total: low.length, completed: low.filter(g => isGoalCompletedInPeriod(g)).length },
+              { priority: 'Medium', total: medium.length, completed: medium.filter(g => isGoalCompletedInPeriod(g)).length },
+              { priority: 'High', total: high.length, completed: high.filter(g => isGoalCompletedInPeriod(g)).length }
             ].filter(stat => stat.total > 0);
           };
 
@@ -1195,9 +1467,36 @@
                           React.createElement('span', { className: "flex-1 text-left font-medium" }, cat.name),
                           count > 0 && React.createElement('span', { className: "text-xs text-gray-400 font-normal" }, count),
                           React.createElement('div', { 
-                            className: "opacity-0 group-hover:opacity-100 flex gap-1 ml-2",
+                            className: "opacity-0 group-hover:opacity-100 flex gap-0.5 ml-2",
                             onClick: (e) => e.stopPropagation()
                           },
+                            // Move Up Button
+                            React.createElement('button', {
+                              onClick: (e) => {
+                                e.stopPropagation();
+                                moveCategoryUp(cat.id);
+                              },
+                              className: "p-0.5 text-gray-400 hover:text-blue-600 rounded",
+                              title: "Move up"
+                            },
+                              React.createElement('svg', { width: 12, height: 12, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" },
+                                React.createElement('polyline', { points: "18 15 12 9 6 15" })
+                              )
+                            ),
+                            // Move Down Button
+                            React.createElement('button', {
+                              onClick: (e) => {
+                                e.stopPropagation();
+                                moveCategoryDown(cat.id);
+                              },
+                              className: "p-0.5 text-gray-400 hover:text-blue-600 rounded",
+                              title: "Move down"
+                            },
+                              React.createElement('svg', { width: 12, height: 12, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" },
+                                React.createElement('polyline', { points: "6 9 12 15 18 9" })
+                              )
+                            ),
+                            // Edit Button
                             React.createElement('button', {
                               onClick: (e) => {
                                 e.stopPropagation();
@@ -1212,6 +1511,7 @@
                             },
                               React.createElement(Edit2, { size: 12 })
                             ),
+                            // Delete Button
                             React.createElement('button', {
                               onClick: (e) => {
                                 e.stopPropagation();
@@ -1248,7 +1548,7 @@
                   // Clear All Data Button
                   React.createElement('button', {
                     onClick: () => {
-                      if (confirm('âš ï¸ WARNING: This will delete ALL your data!\n\nThis includes:\nâ€¢ All goals and tasks\nâ€¢ All custom categories\nâ€¢ All completion history\nâ€¢ All settings\n\nThis action CANNOT be undone!\n\nAre you absolutely sure?')) {
+                      if (confirm('WARNING: This will delete ALL your data!\n\nThis includes:\n- All goals and tasks\n- All custom categories\n- All completion history\n- All settings\n\nThis action CANNOT be undone!\n\nAre you absolutely sure?')) {
                         if (confirm('Last chance! Are you 100% sure you want to delete everything?')) {
                           // Clear all localStorage
                           localStorage.clear();
@@ -1263,7 +1563,7 @@
                             { id: 'relationships', name: 'Relationships', icon: Users, iconName: 'Users', color: '#8B5CF6', isDefault: true },
                             { id: 'personal', name: 'Personal', icon: Home, iconName: 'Home', color: '#06B6D4', isDefault: true }
                           ]);
-                          alert('âœ… All data has been cleared!\n\nYour app is now completely empty and ready for your real data.');
+                          alert('All data has been cleared!\n\nYour app is now completely empty and ready for your real data.');
                         }
                       }
                     },
@@ -1283,17 +1583,6 @@
                   activeView === 'notes' ? 'Notes' :
                   activeListInfo?.name || activeCategoryInfo?.name || 'Goals'
                 ),
-                activeView === 'calendar' && React.createElement('div', { className: "flex gap-1 bg-gray-100 rounded-lg p-1" },
-                  ['week', 'month'].map(view =>
-                    React.createElement('button', {
-                      key: view,
-                      onClick: () => setCalendarView(view),
-                      className: `px-3 py-1 text-xs font-medium rounded capitalize ${
-                        calendarView === view ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-                      }`
-                    }, view)
-                  )
-                )
               ),
               showListManager && React.createElement('div', { 
                 className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50",
@@ -1424,36 +1713,69 @@
                     ),
                     React.createElement('div', { className: "grid grid-cols-2 gap-3 mb-3" },
                       React.createElement('div', {},
-                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'Time'),
+                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'Start Time'),
                         React.createElement('input', {
                           type: "time",
-                          value: selectedTime,
-                          onChange: (e) => setSelectedTime(e.target.value),
+                          value: selectedStartTime,
+                          onChange: (e) => setSelectedStartTime(e.target.value),
                           className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         })
                       ),
+                      React.createElement('div', {},
+                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'End Time'),
+                        React.createElement('input', {
+                          type: "time",
+                          value: selectedEndTime,
+                          onChange: (e) => setSelectedEndTime(e.target.value),
+                          className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        })
+                      )
+                    ),
+                    React.createElement('div', { className: "grid grid-cols-2 gap-3 mb-3" },
+                      React.createElement('div', {},
+                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'Start Date (optional)'),
+                        React.createElement('input', {
+                          type: "date",
+                          value: selectedStartDate,
+                          onChange: (e) => setSelectedStartDate(e.target.value),
+                          className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        })
+                      ),
+                      React.createElement('div', {},
+                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'End Date (optional)'),
+                        React.createElement('input', {
+                          type: "date",
+                          value: selectedEndDate,
+                          onChange: (e) => setSelectedEndDate(e.target.value),
+                          className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        })
+                      )
+                    ),
+                    React.createElement('div', { className: "grid grid-cols-3 gap-3 mb-3" },
                       React.createElement('div', {},
                         React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'Target (optional)'),
                         React.createElement('input', {
                           type: "number",
                           value: targetCompletions || '',
                           onChange: (e) => setTargetCompletions(parseInt(e.target.value) || 0),
-                          placeholder: "e.g., 50 times",
+                          placeholder: "e.g., 50",
                           min: "0",
                           className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         })
-                      )
-                    ),
-                    React.createElement('div', { className: "flex items-center gap-3 mb-3" },
-                      React.createElement('label', { className: "flex items-center gap-2 cursor-pointer" },
-                        React.createElement('input', {
-                          type: "checkbox",
-                          checked: isRecurring,
-                          onChange: (e) => setIsRecurring(e.target.checked),
-                          className: "w-4 h-4 text-blue-500 rounded focus:ring-2 focus:ring-blue-500"
-                        }),
-                        React.createElement('span', { className: "text-sm text-gray-700" }, 'Recurring')
                       ),
+                      // Show current completions field only when editing
+                      editingGoalId ? React.createElement('div', {},
+                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'Current Count'),
+                        React.createElement('input', {
+                          type: "number",
+                          value: currentCompletions,
+                          onChange: (e) => setCurrentCompletions(Math.max(0, parseInt(e.target.value) || 0)),
+                          placeholder: "0",
+                          min: "0",
+                          className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        })
+                      ) : React.createElement('div'),
+                      React.createElement('div', { className: "flex items-center gap-4 pt-6" },
                       React.createElement('label', { className: "flex items-center gap-2 cursor-pointer" },
                         React.createElement('input', {
                           type: "checkbox",
@@ -1461,27 +1783,8 @@
                           onChange: (e) => setIsReminder(e.target.checked),
                           className: "w-4 h-4 text-blue-500 rounded focus:ring-2 focus:ring-blue-500"
                         }),
-                        React.createElement('span', { className: "text-sm text-gray-700" }, 'Reminder (hide from calendar)')
-                      )
-                    ),
-                    React.createElement('div', { className: "grid grid-cols-2 gap-3 mb-3" },
-                      React.createElement('div', {},
-                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'Start Date/Time (optional)'),
-                        React.createElement('input', {
-                          type: "datetime-local",
-                          value: startDateTime,
-                          onChange: (e) => setStartDateTime(e.target.value),
-                          className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        })
-                      ),
-                      React.createElement('div', {},
-                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, 'End Date/Time (optional)'),
-                        React.createElement('input', {
-                          type: "datetime-local",
-                          value: endDateTime,
-                          onChange: (e) => setEndDateTime(e.target.value),
-                          className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        })
+                          React.createElement('span', { className: "text-sm text-gray-700" }, 'Reminder')
+                        )
                       )
                     ),
                     React.createElement('div', { className: "flex gap-2" },
@@ -1511,21 +1814,26 @@
                         
                         const CategoryIcon = category.icon;
                         const timeframe = goal.timeframe;
+                        const hasTarget = goal.targetCompletions && goal.targetCompletions > 0;
+                        const progress = getGoalProgress(goal);
+                        const isCompleted = isGoalCompletedInPeriod(goal);
                         
                         return React.createElement('div', {
                           key: goal.id,
                           className: "bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow"
                         },
                           React.createElement('div', { className: "flex items-start gap-3" },
+                            // Click to add completion (for targets) or toggle (for simple tasks)
                             React.createElement('button', {
                               onClick: () => toggleGoal(goal.id, timeframe),
                               className: `flex-shrink-0 w-5 h-5 rounded-full border-2 transition-all mt-0.5 ${
-                                goal.completed
+                                isCompleted
                                   ? 'bg-blue-500 border-blue-500'
                                   : 'border-gray-300 hover:border-blue-400'
-                              }`
+                              }`,
+                              title: hasTarget ? `Add completion (+1) - ${progress.current}/${progress.target}` : (isCompleted ? 'Mark incomplete' : 'Mark complete')
                             },
-                              goal.completed && React.createElement('div', { className: "w-full h-full flex items-center justify-center" },
+                              isCompleted && React.createElement('div', { className: "w-full h-full flex items-center justify-center" },
                                 React.createElement('svg', { className: "w-3 h-3 text-white", fill: "none", viewBox: "0 0 24 24", stroke: "currentColor" },
                                   React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: 3, d: "M5 13l4 4L19 7" })
                                 )
@@ -1534,7 +1842,7 @@
                             React.createElement('div', { className: "flex-1 min-w-0" },
                               React.createElement('div', { className: "flex items-start justify-between gap-2 mb-1" },
                                 React.createElement('span', {
-                                  className: `text-sm font-medium ${goal.completed ? 'text-gray-400 line-through' : 'text-gray-900'}`
+                                  className: `text-sm font-medium ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-900'}`
                                 }, goal.text),
                                 React.createElement('div', { className: "flex gap-2 flex-shrink-0" },
                                   React.createElement('button', {
@@ -1562,21 +1870,20 @@
                                   React.createElement(CategoryIcon, { size: 12, style: { color: category.color } }),
                                   React.createElement('span', {}, category.name)
                                 ),
-                                goal.targetCompletions && React.createElement('div', { 
-                                  className: "flex items-center gap-1 px-2 py-0.5 rounded-full",
+                                hasTarget && React.createElement('div', { 
+                                  className: `flex items-center gap-1 px-2 py-0.5 rounded-full ${isCompleted ? 'ring-2 ring-green-400' : ''}`,
                                   style: { 
-                                    backgroundColor: category.color + '20',
-                                    color: category.color
+                                    backgroundColor: isCompleted ? '#10b98130' : category.color + '20',
+                                    color: isCompleted ? '#10b981' : category.color
                                   }
                                 },
                                   React.createElement(Target, { size: 12 }),
                                   React.createElement('span', { className: "font-semibold" }, 
-                                    `${(goal.completedDates || []).length}/${goal.targetCompletions}`
+                                    `${progress.current}/${progress.target}`
+                                  ),
+                                  isCompleted && React.createElement('svg', { width: 12, height: 12, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 3 },
+                                    React.createElement('path', { d: "M5 13l4 4L19 7" })
                                   )
-                                ),
-                                goal.recurring && React.createElement('div', { className: "flex items-center gap-1" },
-                                  React.createElement(Repeat, { size: 12 }),
-                                  React.createElement('span', {}, 'Recurring')
                                 ),
                                 React.createElement('div', { className: "flex gap-1 ml-auto" },
                                   [0, 1, 2].map(p =>
@@ -1641,92 +1948,7 @@
                       )
                     )
                   ),
-                  calendarView === 'month' && (() => {
-                    const { daysInMonth, startingDayOfWeek, year, month } = getDaysInMonth(currentDate);
-                    const days = [];
-                    
-                    for (let i = 0; i < startingDayOfWeek; i++) {
-                      days.push(React.createElement('div', { key: `empty-${i}`, className: "aspect-square" }));
-                    }
-                    
-                    for (let day = 1; day <= daysInMonth; day++) {
-                      const date = new Date(year, month, day);
-                      const dateStr = date.toISOString().split('T')[0];
-                      const goalsForDay = getGoalsForDate(date);
-                      const isToday = dateStr === new Date().toISOString().split('T')[0];
-                      
-                      days.push(
-                        React.createElement('div', {
-                          key: day,
-                          className: `aspect-square border border-gray-200 p-2 ${isToday ? 'bg-blue-50 border-blue-500' : 'bg-white'} hover:bg-gray-50 transition-colors relative group`
-                        },
-                          React.createElement('div', { className: "h-full flex flex-col" },
-                            React.createElement('div', { className: "flex items-center justify-between mb-1" },
-                              React.createElement('div', { className: `text-sm font-medium ${isToday ? 'text-blue-600' : 'text-gray-900'}` }, day),
-                              React.createElement('button', {
-                                onClick: () => addGoalToDate(date),
-                                className: "opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity",
-                                title: "Add task to this date"
-                              },
-                                React.createElement(Plus, { size: 12 })
-                              )
-                            ),
-                            React.createElement('div', { className: "flex-1 overflow-y-auto space-y-1" },
-                              goalsForDay.slice(0, 3).map(goal => {
-                                const category = getCategoryForGoal(goal.category);
-                                if (!category) return null;
-                                
-                                const isCompleted = goal.completedDates?.includes(dateStr);
-                                return React.createElement('div', {
-                                  key: goal.id,
-                                  className: "group/task flex items-center gap-1"
-                                },
-                                  React.createElement('button', {
-                                    onClick: () => toggleGoalFromCalendar(goal.id, goal.timeframe, date),
-                                    className: `flex-1 text-left text-xs px-1.5 py-0.5 rounded truncate transition-all ${isCompleted ? 'line-through opacity-50' : 'hover:opacity-75'}`,
-                                    style: { 
-                                      backgroundColor: isCompleted ? '#d1d5db' : category?.color + '20', 
-                                      color: isCompleted ? '#6b7280' : category?.color,
-                                      textDecorationThickness: '2px'
-                                    },
-                                    title: `${goal.text} - Click to ${isCompleted ? 'uncomplete' : 'complete'}`
-                                  },
-                                    React.createElement('span', { className: "flex items-center gap-1" },
-                                      React.createElement('span', { className: `inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isCompleted ? 'bg-current' : 'border border-current'}` }),
-                                      goal.text
-                                    )
-                                  ),
-                                  React.createElement('button', {
-                                    onClick: (e) => {
-                                      e.stopPropagation();
-                                      deleteGoal(goal.id, goal.timeframe);
-                                    },
-                                    className: "opacity-0 group-hover/task:opacity-100 p-0.5 text-gray-400 hover:text-red-600 transition-opacity flex-shrink-0",
-                                    title: "Delete task"
-                                  },
-                                    React.createElement(Trash2, { size: 10 })
-                                  )
-                                );
-                              }),
-                              goalsForDay.length > 3 && React.createElement('div', { className: "text-xs text-gray-500 px-1" }, 
-                                `+${goalsForDay.length - 3} more`
-                              )
-                            )
-                          )
-                        )
-                      );
-                    }
-                    
-                    return React.createElement('div', {},
-                      React.createElement('div', { className: "grid grid-cols-7 gap-0 mb-2" },
-                        ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day =>
-                          React.createElement('div', { key: day, className: "text-center text-xs font-semibold text-gray-600 py-2" }, day)
-                        )
-                      ),
-                      React.createElement('div', { className: "grid grid-cols-7 gap-0 border border-gray-200" }, days)
-                    );
-                  })(),
-                  calendarView === 'week' && (() => {
+                  (() => {
                     const weekDays = getWeekDays();
                     
                     return React.createElement('div', { className: "bg-white rounded-lg border border-gray-200 overflow-x-auto" },
@@ -1803,113 +2025,219 @@
                                   onMouseUp: handleCalendarCellMouseUp
                                 });
                               }),
-                              // Render all tasks for the day with absolute positioning
-                              goalsForDay.map((goal, goalIndex) => {
-                                const category = getCategoryForGoal(goal.category);
-                                if (!category) return null;
-
-                                const isCompleted = goal.completedDates?.includes(dateStr);
-
-                                // Calculate position and height based on startDateTime/endDateTime
-                                let topPosition = 0;
-                                let height = 80; // Default height (1 hour)
+                              // Pre-process all tasks to calculate their time ranges for overlap detection
+                              (() => {
+                                // First, calculate time ranges for all tasks
+                                const tasksWithTimes = goalsForDay.map((goal, originalIndex) => {
                                 let startHour = 0;
                                 let startMinute = 0;
+                                  let endHour = 1;
+                                  let endMinute = 0;
+                                  let hasTime = false;
+                                  
+                                  // For recurring tasks (daily/weekly), show on every day using their time
+                                  // For one-time tasks, only show on their specific date
+                                  const isRecurringTimeframe = goal.timeframe === 'daily' || goal.timeframe === 'weekly';
 
                                 if (goal.startDateTime) {
                                   const startDate = new Date(goal.startDateTime);
                                   const startDateStr = startDate.toISOString().split('T')[0];
 
-                                  // Only render this task if it starts on this day
-                                  if (startDateStr !== dateStr) return null;
+                                  // Only filter by date for non-recurring tasks
+                                  if (!isRecurringTimeframe && startDateStr !== dateStr) return null;
 
                                   startHour = startDate.getHours();
                                   startMinute = startDate.getMinutes();
-                                  topPosition = startHour * 80 + (startMinute / 60) * 80;
+                                    hasTime = true;
 
                                   if (goal.endDateTime) {
                                     const endDate = new Date(goal.endDateTime);
-                                    const endHour = endDate.getHours();
-                                    const endMinute = endDate.getMinutes();
-                                    const durationInMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
-                                    height = Math.max((durationInMinutes / 60) * 80, 40); // Minimum 40px height
+                                      endHour = endDate.getHours();
+                                      endMinute = endDate.getMinutes();
+                                    } else {
+                                      endHour = startHour + 1;
+                                      endMinute = startMinute;
                                   }
                                 } else if (goal.time) {
-                                  // Fall back to time field for tasks without startDateTime
                                   const timeParts = goal.time.split(':');
                                   if (timeParts.length === 2) {
                                     startHour = parseInt(timeParts[0]);
                                     startMinute = parseInt(timeParts[1]) || 0;
-                                    topPosition = startHour * 80 + (startMinute / 60) * 80;
+                                      endHour = startHour + 1;
+                                      endMinute = startMinute;
+                                      hasTime = true;
+                                    }
                                   }
-                                } else {
-                                  return null; // Don't render tasks without time information
-                                }
-
-                                // Calculate overlap with other tasks and adjust width/position
-                                let leftOffset = 0;
-                                let widthPercent = 100;
-                                const overlappingTasks = goalsForDay.filter((otherGoal, otherIndex) => {
-                                  if (otherIndex >= goalIndex || !otherGoal.startDateTime) return false;
-                                  const otherStart = new Date(otherGoal.startDateTime);
-                                  const otherStartTime = otherStart.getHours() * 60 + otherStart.getMinutes();
-                                  let otherEndTime = otherStartTime + 60; // Default 1 hour
-                                  if (otherGoal.endDateTime) {
-                                    const otherEnd = new Date(otherGoal.endDateTime);
-                                    otherEndTime = otherEnd.getHours() * 60 + otherEnd.getMinutes();
+                                  
+                                  if (!hasTime) return null;
+                                  
+                                  const actualStartMinutes = startHour * 60 + startMinute;
+                                  const actualEndMinutes = endHour * 60 + endMinute;
+                                  // Minimum visual duration of 45 minutes (matches 60px min height at 80px/hour)
+                                  // This ensures enough space for title + time display
+                                  const minVisualDuration = 45;
+                                  const minHeight = 60; // px - enough for title row + time row + padding
+                                  const visualEndMinutes = Math.max(actualEndMinutes, actualStartMinutes + minVisualDuration);
+                                  
+                                  return {
+                                    goal,
+                                    originalIndex,
+                                    startMinutes: actualStartMinutes,
+                                    endMinutes: visualEndMinutes, // Use visual end for overlap detection
+                                    actualEndMinutes: actualEndMinutes, // Keep actual for height calculation
+                                    startHour,
+                                    startMinute,
+                                    topPosition: startHour * 80 + (startMinute / 60) * 80,
+                                    height: Math.max((actualEndMinutes - actualStartMinutes) / 60 * 80, minHeight)
+                                  };
+                                }).filter(t => t !== null);
+                                
+                                // Function to check if two tasks truly overlap (not just touch)
+                                // Tasks that just touch (one ends when another starts) don't overlap
+                                const tasksOverlap = (t1, t2) => {
+                                  return t1.startMinutes < t2.endMinutes && t1.endMinutes > t2.startMinutes;
+                                };
+                                
+                                // Find all overlapping groups using union-find approach (for column assignment)
+                                const groups = [];
+                                const taskToGroup = new Map();
+                                
+                                tasksWithTimes.forEach((task) => {
+                                  // Find all existing groups this task overlaps with
+                                  const overlappingGroups = [];
+                                  groups.forEach((group, groupIndex) => {
+                                    if (group.some(t => tasksOverlap(t, task))) {
+                                      overlappingGroups.push(groupIndex);
+                                    }
+                                  });
+                                  
+                                  if (overlappingGroups.length === 0) {
+                                    // Create a new group
+                                    const newGroupIndex = groups.length;
+                                    groups.push([task]);
+                                    taskToGroup.set(task.originalIndex, newGroupIndex);
+                                  } else if (overlappingGroups.length === 1) {
+                                    // Add to existing group
+                                    groups[overlappingGroups[0]].push(task);
+                                    taskToGroup.set(task.originalIndex, overlappingGroups[0]);
+                                  } else {
+                                    // Merge multiple groups
+                                    const mergedGroup = [task];
+                                    overlappingGroups.sort((a, b) => b - a).forEach(groupIndex => {
+                                      mergedGroup.push(...groups[groupIndex]);
+                                      groups.splice(groupIndex, 1);
+                                    });
+                                    const newGroupIndex = groups.length;
+                                    groups.push(mergedGroup);
+                                    mergedGroup.forEach(t => taskToGroup.set(t.originalIndex, newGroupIndex));
                                   }
-                                  const thisStartTime = startHour * 60 + startMinute;
-                                  const thisEndTime = goal.endDateTime
-                                    ? new Date(goal.endDateTime).getHours() * 60 + new Date(goal.endDateTime).getMinutes()
-                                    : thisStartTime + 60;
-
-                                  // Check if tasks overlap
-                                  return (thisStartTime < otherEndTime && thisEndTime > otherStartTime);
                                 });
-
-                                if (overlappingTasks.length > 0) {
-                                  widthPercent = 100 / (overlappingTasks.length + 1);
-                                  leftOffset = overlappingTasks.length * widthPercent;
-                                }
+                                
+                                // Sort tasks within each group by start time, then by original index for consistency
+                                groups.forEach(group => {
+                                  group.sort((a, b) => a.startMinutes - b.startMinutes || a.originalIndex - b.originalIndex);
+                                });
+                                
+                                // Assign column positions within each group
+                                const taskPositions = new Map();
+                                groups.forEach(group => {
+                                  if (group.length === 1) {
+                                    // Single task in group - full width
+                                    taskPositions.set(group[0].originalIndex, {
+                                      column: 0,
+                                      totalColumns: 1
+                                    });
+                                    return;
+                                  }
+                                  
+                                  const columns = []; // Each column tracks the end time of the last task in it
+                                  
+                                  // First pass: assign columns
+                                  group.forEach(task => {
+                                    // Find the first column where this task can fit (no overlap)
+                                    let column = 0;
+                                    while (column < columns.length && columns[column] > task.startMinutes) {
+                                      column++;
+                                    }
+                                    
+                                    // Place task in this column
+                                    if (column >= columns.length) {
+                                      columns.push(task.endMinutes);
+                                    } else {
+                                      columns[column] = task.endMinutes;
+                                    }
+                                    
+                                    taskPositions.set(task.originalIndex, {
+                                      column,
+                                      totalColumns: null // Will be set in second pass
+                                    });
+                                  });
+                                  
+                                  // Total columns needed for this group
+                                  const totalColumns = columns.length;
+                                  
+                                  // Second pass: set totalColumns for all tasks in group
+                                  group.forEach(task => {
+                                    const pos = taskPositions.get(task.originalIndex);
+                                    pos.totalColumns = totalColumns;
+                                  });
+                                });
+                                
+                                // Now render each task with proper positioning
+                                return tasksWithTimes.map((taskData) => {
+                                  const { goal, originalIndex, topPosition, height, startHour, startMinute } = taskData;
+                                  const category = getCategoryForGoal(goal.category);
+                                  if (!category) return null;
+                                  
+                                  const hasTarget = goal.targetCompletions && goal.targetCompletions > 0;
+                                  const progress = getGoalProgress(goal);
+                                  const isCompleted = hasTarget ? isGoalCompletedInPeriod(goal) : goal.completedDates?.includes(dateStr);
+                                  const isReminder = goal.isReminder;
+                                  
+                                  const position = taskPositions.get(originalIndex) || { column: 0, totalColumns: 1 };
+                                  const widthPercent = 100 / position.totalColumns;
+                                  const leftOffset = position.column * widthPercent;
 
                                 return React.createElement('div', {
                                   key: goal.id,
-                                  className: "group/task absolute p-1 flex items-start gap-1",
+                                  className: "group/task absolute",
                                   style: {
                                     top: `${topPosition}px`,
                                     left: `${leftOffset}%`,
                                     width: `${widthPercent}%`,
                                     height: `${height}px`,
-                                    zIndex: 10
+                                    zIndex: 10,
+                                    padding: '2px'
                                   }
                                 },
-                                  React.createElement('input', {
-                                    type: "checkbox",
-                                    checked: isCompleted,
-                                    onChange: (e) => {
+                                  React.createElement(isReminder ? 'div' : 'button', {
+                                    onClick: isReminder ? undefined : (e) => {
                                       e.stopPropagation();
                                       toggleGoalFromCalendar(goal.id, goal.timeframe, day);
                                     },
-                                    className: "mt-1 w-3.5 h-3.5 text-blue-500 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer flex-shrink-0",
-                                    title: isCompleted ? 'Mark as incomplete' : 'Mark as complete'
-                                  }),
-                                  React.createElement('button', {
-                                    onClick: (e) => {
-                                      e.stopPropagation();
-                                      toggleGoalFromCalendar(goal.id, goal.timeframe, day);
-                                    },
-                                    className: `flex-1 text-left text-xs p-1 rounded transition-all overflow-hidden ${isCompleted ? 'line-through opacity-60' : 'hover:opacity-75'}`,
+                                    className: `w-full h-full text-left text-xs p-2 rounded transition-all overflow-hidden ${isCompleted ? 'line-through opacity-60' : (isReminder ? 'opacity-90' : 'hover:opacity-75')} ${isReminder ? 'cursor-default' : 'cursor-pointer'}`,
                                     style: {
                                       backgroundColor: isCompleted ? '#d1d5db' : category.color + '20',
                                       borderLeft: `3px solid ${category.color}`,
-                                      textDecorationThickness: '1px',
-                                      minHeight: '100%'
+                                      borderStyle: isReminder ? 'dashed' : 'solid',
+                                      textDecorationThickness: '1px'
                                     },
-                                    title: `${goal.text} - Click to ${isCompleted ? 'uncomplete' : 'complete'}`
+                                    title: isReminder ? `${goal.text} (Reminder)` : hasTarget ? `${goal.text} - ${progress.current}/${progress.target} - Click to add completion` : `${goal.text} - Click to ${isCompleted ? 'uncomplete' : 'complete'}`
                                   },
                                     React.createElement('div', {
-                                      className: "text-gray-900 text-xs font-medium truncate"
-                                    }, goal.text),
+                                      className: "flex items-center gap-1"
+                                    },
+                                      !isReminder && !hasTarget && React.createElement('span', { 
+                                        className: `inline-block w-2 h-2 rounded-full flex-shrink-0 ${isCompleted ? 'bg-green-500' : 'border-2 border-current'}`,
+                                        style: { borderColor: isCompleted ? undefined : category.color }
+                                      }),
+                                      !isReminder && hasTarget && React.createElement('span', { 
+                                        className: `text-xs font-bold flex-shrink-0 px-1 rounded ${isCompleted ? 'bg-green-500 text-white' : ''}`,
+                                        style: { color: isCompleted ? undefined : category.color }
+                                      }, `${progress.current}/${progress.target}`),
+                                      isReminder && React.createElement(Clock, { size: 10, className: "flex-shrink-0", style: { color: category.color } }),
+                                      React.createElement('span', { className: "text-gray-900 text-xs font-medium truncate" }, goal.text)
+                                    ),
                                     goal.time && React.createElement('div', {
                                       className: "text-xs opacity-70 truncate",
                                       style: { color: category.color }
@@ -1920,13 +2248,14 @@
                                       e.stopPropagation();
                                       deleteGoal(goal.id, goal.timeframe);
                                     },
-                                    className: "absolute top-0.5 right-0.5 opacity-0 group-hover/task:opacity-100 p-0.5 bg-white rounded shadow-sm text-gray-400 hover:text-red-600 transition-opacity",
+                                    className: "absolute top-1 right-1 opacity-0 group-hover/task:opacity-100 p-0.5 bg-white rounded shadow-sm text-gray-400 hover:text-red-600 transition-opacity",
                                     title: "Delete task"
                                   },
                                     React.createElement(Trash2, { size: 10 })
                                   )
                                 );
-                              })
+                                });
+                              })()
                             )
                           );
                         })
@@ -1952,25 +2281,29 @@
                                 const CategoryIcon = category.icon;
                                 const dateStr = currentDate.toISOString().split('T')[0];
                                 const isCompleted = goal.completedDates?.includes(dateStr);
+                                const isReminder = goal.isReminder;
                                 
                                 return React.createElement('div', {
                                   key: goal.id,
                                   className: "group/task relative"
                                 },
-                                  React.createElement('button', {
-                                    onClick: () => toggleGoalFromCalendar(goal.id, goal.timeframe, currentDate),
-                                    className: `w-full text-left p-3 rounded-lg transition-all ${isCompleted ? 'line-through opacity-60' : 'hover:opacity-75'}`,
+                                  React.createElement(isReminder ? 'div' : 'button', {
+                                    onClick: isReminder ? undefined : () => toggleGoalFromCalendar(goal.id, goal.timeframe, currentDate),
+                                    className: `w-full text-left p-3 rounded-lg transition-all ${isCompleted ? 'line-through opacity-60' : (isReminder ? 'opacity-90' : 'hover:opacity-75')} ${isReminder ? 'cursor-default' : ''}`,
                                     style: { 
                                       backgroundColor: isCompleted ? '#d1d5db' : category.color + '20', 
-                                      borderLeft: `4px solid ${category.color}`,
+                                      borderLeft: `4px ${isReminder ? 'dashed' : 'solid'} ${category.color}`,
                                       textDecorationThickness: '2px'
                                     },
-                                    title: `${goal.text} - Click to ${isCompleted ? 'uncomplete' : 'complete'}`
+                                    title: isReminder ? `${goal.text} (Reminder)` : `${goal.text} - Click to ${isCompleted ? 'uncomplete' : 'complete'}`
                                   },
                                     React.createElement('div', { className: "flex items-center gap-2 mb-1" },
-                                      React.createElement('span', { className: `inline-block w-1.5 h-1.5 rounded-full ${isCompleted ? 'bg-current' : 'border border-current'}`, style: { color: isCompleted ? '#9ca3af' : category.color } }),
+                                      isReminder 
+                                        ? React.createElement(Clock, { size: 14, style: { color: isCompleted ? '#9ca3af' : category.color } })
+                                        : React.createElement('span', { className: `inline-block w-1.5 h-1.5 rounded-full ${isCompleted ? 'bg-current' : 'border border-current'}`, style: { color: isCompleted ? '#9ca3af' : category.color } }),
                                       CategoryIcon && React.createElement(CategoryIcon, { size: 14, style: { color: isCompleted ? '#9ca3af' : category.color } }),
-                                      React.createElement('span', { className: "text-sm font-medium", style: { color: isCompleted ? '#9ca3af' : category.color } }, goal.time)
+                                      React.createElement('span', { className: "text-sm font-medium", style: { color: isCompleted ? '#9ca3af' : category.color } }, goal.time),
+                                      isReminder && React.createElement('span', { className: "text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500" }, 'Reminder')
                                     ),
                                     React.createElement('div', { className: "text-sm font-medium", style: { color: isCompleted ? '#9ca3af' : '#111827' } }, goal.text),
                                     React.createElement('div', { className: "text-xs mt-1", style: { color: isCompleted ? '#9ca3af' : '#6b7280' } }, category.name)
@@ -1999,7 +2332,7 @@
                     const streakData = getStreakData();
                     const completionRate = getCompletionRate();
                     const allGoals = getAllGoals();
-                    const completedGoals = allGoals.filter(g => g.completed).length;
+                    const completedGoals = allGoals.filter(g => isGoalCompletedInPeriod(g)).length;
                     const categoryStats = getCategoryCompletionStats();
                   
                   // Get time range based on selected period
@@ -2029,7 +2362,7 @@
                   const getPeriodData = () => {
                     const { startDate, endDate } = getTimeRange();
                     const data = [];
-                    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
                     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                     
                     let daysToShow = statsTimePeriod === 'week' ? 7 : statsTimePeriod === 'month' ? 30 : statsTimePeriod === 'year' ? 12 : 7;
@@ -2081,7 +2414,7 @@
                         });
                         
                         data.push({
-                          day: statsTimePeriod === 'week' ? days[date.getDay()] : date.getDate().toString(),
+                          day: statsTimePeriod === 'week' ? days[(date.getDay() + 6) % 7] : date.getDate().toString(),
                           date: dateStr,
                           completed: completed
                         });
@@ -2117,16 +2450,18 @@
                       const completedCount = (goal.completedDates || []).length;
                       const periodCompletedCount = (goal.completedDates || []).filter(d => new Date(d) >= startDate).length;
                       const category = getCategoryForGoal(goal.category);
+                      const progress = getGoalProgress(goal);
                       return {
                         id: goal.id,
                         text: goal.text,
                         category: category?.name || 'Unknown',
-                        categoryColor: category?.color || '#gray',
+                        categoryColor: category?.color || '#6b7280',
                         timeframe: goal.timeframe,
-                        completed: goal.completed,
+                        completed: isGoalCompletedInPeriod(goal),
                         completedCount: completedCount,
                         periodCompletedCount: periodCompletedCount,
                         targetCompletions: goal.targetCompletions,
+                        periodProgress: progress,
                         priority: goal.priority || 0
                       };
                     }).sort((a, b) => b.periodCompletedCount - a.periodCompletedCount);
@@ -2144,7 +2479,7 @@
                     allGoals.forEach(goal => {
                       if (timeframes[goal.timeframe]) {
                         timeframes[goal.timeframe].total++;
-                        if (goal.completed) {
+                        if (isGoalCompletedInPeriod(goal)) {
                           timeframes[goal.timeframe].completed++;
                         }
                       }
@@ -2238,120 +2573,65 @@
                       
                       // Charts Row  
                       React.createElement('div', { className: "grid grid-cols-2 gap-6 mb-6" },
-                        // Period Activity Chart
+                        // Period Activity Chart - Bar Chart Style
                         React.createElement('div', { className: "bg-white rounded-xl border border-gray-200 p-6" },
-                          React.createElement('h3', { className: "text-lg font-bold text-gray-900 mb-4" }, 
-                            statsTimePeriod === 'week' ? 'Last 7 Days' : 
-                            statsTimePeriod === 'month' ? 'Last 30 Days' : 
-                            statsTimePeriod === 'year' ? 'Last 12 Months' : 'All Time Activity'
-                          ),
-                          React.createElement('div', { className: "flex gap-3" },
-                            // Y-axis labels
-                            React.createElement('div', { className: "flex flex-col justify-between text-xs text-gray-500 py-2" }, 
-                              (() => {
-                                const maxVal = Math.max(...periodData.map(d => d.completed), 1);
-                                const niceMax = Math.ceil(maxVal * 1.1); // 10% padding
-                                const step = Math.ceil(niceMax / 4);
-                                return [4, 3, 2, 1, 0].map(i => 
-                                  React.createElement('div', { key: i, className: "text-right pr-2" }, step * i)
-                                );
-                              })()
+                          React.createElement('div', { className: "flex items-center justify-between mb-4" },
+                            React.createElement('h3', { className: "text-lg font-bold text-gray-900" }, 
+                              statsTimePeriod === 'week' ? 'Last 7 Days' : 
+                              statsTimePeriod === 'month' ? 'Last 30 Days' : 
+                              statsTimePeriod === 'year' ? 'Last 12 Months' : 'All Time Activity'
                             ),
-                            // Chart area
-                            React.createElement('div', { className: "flex-1" },
-                              React.createElement('div', { className: "relative h-48" },
-                                React.createElement('svg', { 
-                                  viewBox: "0 0 100 100", 
-                                  className: "w-full h-full", 
-                                  preserveAspectRatio: "none",
-                                  style: { overflow: 'visible' }
-                                },
-                                  // Grid lines
-                                  [0, 25, 50, 75, 100].map(y =>
-                                    React.createElement('line', {
-                                      key: y,
-                                      x1: 0,
-                                      y1: y,
-                                      x2: 100,
-                                      y2: y,
-                                      stroke: '#e5e7eb',
-                                      strokeWidth: 0.3
-                                    })
-                                  ),
-                                  // Area fill gradient
-                                  React.createElement('defs', {},
-                                    React.createElement('linearGradient', { id: 'areaGradient', x1: '0', x2: '0', y1: '0', y2: '1' },
-                                      React.createElement('stop', { offset: '0%', stopColor: '#3b82f6', stopOpacity: '0.2' }),
-                                      React.createElement('stop', { offset: '100%', stopColor: '#3b82f6', stopOpacity: '0' })
-                                    )
-                                  ),
-                                  // Area fill
-                                  React.createElement('path', {
-                                    d: (() => {
-                                      const maxVal = Math.max(...periodData.map(d => d.completed), 1);
-                                      const points = periodData.map((d, i) => {
-                                        const x = (i / Math.max(periodData.length - 1, 1)) * 100;
-                                        const y = 100 - ((d.completed / maxVal) * 90);
-                                        return `${x},${y}`;
-                                      });
-                                      const firstX = 0;
-                                      const lastX = 100;
-                                      return `M ${firstX},100 L ${points.map((p, i) => {
-                                        const x = (i / Math.max(periodData.length - 1, 1)) * 100;
-                                        const y = 100 - ((periodData[i].completed / maxVal) * 90);
-                                        return `${x},${y}`;
-                                      }).join(' L ')} L ${lastX},100 Z`;
-                                    })(),
-                                    fill: 'url(#areaGradient)'
-                                  }),
-                                  // Line
-                                  React.createElement('path', {
-                                    d: periodData.map((d, i) => {
-                                      const maxVal = Math.max(...periodData.map(d => d.completed), 1);
-                                      const x = (i / Math.max(periodData.length - 1, 1)) * 100;
-                                      const y = 100 - ((d.completed / maxVal) * 90);
-                                      return `${i === 0 ? 'M' : 'L'} ${x},${y}`;
-                                    }).join(' '),
-                                    stroke: '#3b82f6',
-                                    strokeWidth: 0.8,
-                                    fill: 'none',
-                                    strokeLinecap: 'round',
-                                    strokeLinejoin: 'round'
-                                  }),
-                                  // Dots
-                                  periodData.map((d, i) => {
-                                    const maxVal = Math.max(...periodData.map(d => d.completed), 1);
-                                    const x = (i / Math.max(periodData.length - 1, 1)) * 100;
-                                    const y = 100 - ((d.completed / maxVal) * 90);
-                                    
-                                    return React.createElement('circle', {
-                                      key: `dot-${i}`,
-                                      cx: x,
-                                      cy: y,
-                                      r: 1.2,
-                                      fill: '#3b82f6',
-                                      stroke: 'white',
-                                      strokeWidth: 0.5
-                                    });
-                                  })
-                                )
-                              ),
-                              // X-axis labels
-                              React.createElement('div', { className: "flex justify-between mt-2 text-xs text-gray-500" },
-                                periodData.map((d, i) => {
-                                  // Show fewer labels for better readability
-                                  const showLabel = periodData.length <= 12 || i % Math.ceil(periodData.length / 8) === 0 || i === periodData.length - 1;
-                                  return React.createElement('div', { 
-                                    key: i, 
-                                    className: "text-center",
-                                    style: { 
-                                      flex: 1,
-                                      opacity: showLabel ? 1 : 0
-                                    }
-                                  }, d.day);
-                                })
-                              )
+                            React.createElement('div', { className: "text-2xl font-bold text-blue-600" }, 
+                              periodData.reduce((sum, d) => sum + d.completed, 0) + ' total'
                             )
+                          ),
+                          // Bar Chart
+                          React.createElement('div', { className: "flex items-end gap-1 h-40 mt-4" },
+                            (() => {
+                              const maxVal = Math.max(...periodData.map(d => d.completed), 1);
+                              const displayData = statsTimePeriod === 'month' 
+                                ? periodData.filter((_, i) => i % 3 === 0 || i === periodData.length - 1)
+                                : periodData;
+                              
+                              return displayData.map((d, i) => {
+                                const height = Math.max((d.completed / maxVal) * 100, 2);
+                                const isToday = d.date === new Date().toISOString().split('T')[0];
+                                
+                                return React.createElement('div', { 
+                                  key: i, 
+                                  className: "flex-1 flex flex-col items-center group cursor-pointer"
+                                },
+                                  React.createElement('div', { 
+                                    className: "text-xs font-semibold text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity mb-1"
+                                  }, d.completed),
+                                  React.createElement('div', {
+                                    className: `w-full rounded-t transition-all group-hover:opacity-80`,
+                                    style: {
+                                      height: height + '%',
+                                      backgroundColor: isToday ? '#10b981' : '#3b82f6',
+                                      minHeight: '4px'
+                                    }
+                                  })
+                                );
+                              });
+                            })()
+                          ),
+                          // X-axis labels
+                          React.createElement('div', { className: "flex justify-between mt-3 text-xs text-gray-500 border-t border-gray-100 pt-2" },
+                            (() => {
+                              const displayData = statsTimePeriod === 'month' 
+                                ? periodData.filter((_, i) => i % 3 === 0 || i === periodData.length - 1)
+                                : periodData;
+                              const showEvery = displayData.length > 10 ? Math.ceil(displayData.length / 7) : 1;
+                              
+                              return displayData.map((d, i) => 
+                                React.createElement('div', { 
+                                  key: i, 
+                                  className: "flex-1 text-center",
+                                  style: { opacity: i % showEvery === 0 || i === displayData.length - 1 ? 1 : 0 }
+                                }, d.day)
+                              );
+                            })()
                           )
                         ),
                         
@@ -2408,7 +2688,7 @@
                                 className: "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
                                 style: { backgroundColor: (cat?.color || colors[index]) + '20' }
                               },
-                                cat?.icon && React.createElement(cat.icon, { size: 20, style: { color: cat.color } })
+                                cat?.icon && typeof cat.icon === 'function' && React.createElement(cat.icon, { size: 20, style: { color: cat.color } })
                               ),
                               React.createElement('div', { className: "flex-1" },
                                 React.createElement('div', { className: "flex justify-between mb-1" },
@@ -2679,60 +2959,151 @@
                     ),
                     
                     // Task Performance Tab
-                    statsTab === 'tasks' && React.createElement('div', {},
-                      React.createElement('div', { className: "bg-white rounded-xl border border-gray-200 p-6" },
-                        React.createElement('h3', { className: "text-lg font-bold text-gray-900 mb-4" }, 'Individual Task Performance'),
-                        React.createElement('div', { className: "space-y-2" },
+                    statsTab === 'tasks' && React.createElement('div', { className: "space-y-4" },
+                      // Summary Stats
+                      React.createElement('div', { className: "grid grid-cols-4 gap-4" },
+                        React.createElement('div', { className: "bg-white rounded-xl border border-gray-200 p-4" },
+                          React.createElement('div', { className: "text-sm text-gray-500 mb-1" }, 'Total Completions'),
+                          React.createElement('div', { className: "text-2xl font-bold text-gray-900" }, 
+                            taskPerformance.reduce((sum, t) => sum + t.periodCompletedCount, 0)
+                          ),
+                          React.createElement('div', { className: "text-xs text-gray-500" }, `this ${statsTimePeriod}`)
+                        ),
+                        React.createElement('div', { className: "bg-white rounded-xl border border-gray-200 p-4" },
+                          React.createElement('div', { className: "text-sm text-gray-500 mb-1" }, 'Most Active Task'),
+                          React.createElement('div', { className: "text-sm font-bold text-gray-900 truncate" }, 
+                            taskPerformance[0]?.text || 'None'
+                          ),
+                          React.createElement('div', { className: "text-xs text-blue-600 font-semibold" }, 
+                            taskPerformance[0] ? `${taskPerformance[0].periodCompletedCount} times` : ''
+                          )
+                        ),
+                        React.createElement('div', { className: "bg-white rounded-xl border border-gray-200 p-4" },
+                          React.createElement('div', { className: "text-sm text-gray-500 mb-1" }, 'Active Tasks'),
+                          React.createElement('div', { className: "text-2xl font-bold text-gray-900" }, 
+                            taskPerformance.filter(t => {
+                              const goal = allGoals.find(g => g.id === t.id);
+                              return goal && !isGoalCompletedInPeriod(goal);
+                            }).length
+                          ),
+                          React.createElement('div', { className: "text-xs text-gray-500" }, 'in progress')
+                        ),
+                        React.createElement('div', { className: "bg-white rounded-xl border border-gray-200 p-4" },
+                          React.createElement('div', { className: "text-sm text-gray-500 mb-1" }, 'Avg per Task'),
+                          React.createElement('div', { className: "text-2xl font-bold text-gray-900" }, 
+                            taskPerformance.length > 0 
+                              ? (taskPerformance.reduce((sum, t) => sum + t.periodCompletedCount, 0) / taskPerformance.length).toFixed(1)
+                              : '0'
+                          ),
+                          React.createElement('div', { className: "text-xs text-gray-500" }, `this ${statsTimePeriod}`)
+                        )
+                      ),
+                      
+                      // Task List with Sparklines
+                      React.createElement('div', { className: "bg-white rounded-xl border border-gray-200 overflow-hidden" },
+                        // Header
+                        React.createElement('div', { className: "grid grid-cols-12 gap-4 px-6 py-3 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide" },
+                          React.createElement('div', { className: "col-span-4" }, 'Task'),
+                          React.createElement('div', { className: "col-span-2 text-center" }, 'Category'),
+                          React.createElement('div', { className: "col-span-3 text-center" }, `Last ${statsTimePeriod === 'week' ? '7 days' : statsTimePeriod === 'month' ? '30 days' : '12 months'}`),
+                          React.createElement('div', { className: "col-span-2 text-center" }, 'Count'),
+                          React.createElement('div', { className: "col-span-1 text-right" }, 'Progress')
+                        ),
+                        // Task Rows
+                        React.createElement('div', { className: "divide-y divide-gray-100" },
                           taskPerformance.length === 0 ?
-                            React.createElement('div', { className: "text-center py-8 text-gray-500" }, 'No tasks yet') :
+                            React.createElement('div', { className: "text-center py-12 text-gray-400" }, 'No tasks yet. Create some tasks to track your progress!') :
                             taskPerformance.map((task, index) => {
-                              const priorityColors = ['text-gray-600', 'text-orange-600', 'text-red-600'];
-                              const priorityLabels = ['Low', 'Medium', 'High'];
+                              // Generate per-task sparkline data
+                              const taskSparkline = (() => {
+                                const days = statsTimePeriod === 'week' ? 7 : statsTimePeriod === 'month' ? 14 : 12;
+                                const data = [];
+                                for (let i = days - 1; i >= 0; i--) {
+                                  const date = new Date();
+                                  if (statsTimePeriod === 'year') {
+                                    date.setMonth(date.getMonth() - i);
+                                    const monthStr = date.toISOString().slice(0, 7);
+                                    const count = (allGoals.find(g => g.id === task.id)?.completedDates || [])
+                                      .filter(d => d.startsWith(monthStr)).length;
+                                    data.push(count);
+                                  } else {
+                                    date.setDate(date.getDate() - i);
+                                    const dateStr = date.toISOString().split('T')[0];
+                                    const hasCompletion = (allGoals.find(g => g.id === task.id)?.completedDates || []).includes(dateStr);
+                                    data.push(hasCompletion ? 1 : 0);
+                                  }
+                                }
+                                return data;
+                              })();
+                              
+                              const maxSparkline = Math.max(...taskSparkline, 1);
+                              const progressPercent = task.targetCompletions 
+                                ? Math.min((task.completedCount / task.targetCompletions) * 100, 100) 
+                                : null;
                               
                               return React.createElement('div', {
                                 key: task.id,
-                                className: "flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg transition-colors"
+                                className: "grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-gray-50 transition-colors"
                               },
-                                React.createElement('div', { className: "text-sm font-semibold text-gray-500 w-8" }, `#${index + 1}`),
-                                React.createElement('div', {
-                                  className: "w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs",
-                                  style: { backgroundColor: task.categoryColor }
-                                }, task.completedCount),
-                                React.createElement('div', { className: "flex-1" },
-                                  React.createElement('div', { className: "font-medium text-gray-900" }, task.text),
-                                  React.createElement('div', { className: "text-xs text-gray-600 mt-0.5" },
-                                    task.category + ' â€¢ ' + task.timeframe.charAt(0).toUpperCase() + task.timeframe.slice(1) + ' â€¢ ' + priorityLabels[task.priority]
-                                  ),
-                                  task.targetCompletions && React.createElement('div', { className: "mt-2" },
-                                    React.createElement('div', { className: "flex items-center gap-2 text-xs" },
-                                      React.createElement('div', { className: "flex-1 bg-gray-200 rounded-full h-2" },
-                                        React.createElement('div', {
-                                          className: "h-2 rounded-full transition-all",
-                                          style: {
-                                            width: `${Math.min((task.completedCount / task.targetCompletions) * 100, 100)}%`,
-                                            backgroundColor: task.categoryColor
-                                          }
-                                        })
-                                      ),
-                                      React.createElement('span', { className: "font-semibold text-gray-700" }, 
-                                        `${task.completedCount}/${task.targetCompletions}`
-                                      )
+                                // Task Name & Info
+                                React.createElement('div', { className: "col-span-4" },
+                                  React.createElement('div', { className: "font-medium text-gray-900 truncate" }, task.text),
+                                  React.createElement('div', { className: "text-xs text-gray-500 mt-0.5" }, 
+                                    task.timeframe.charAt(0).toUpperCase() + task.timeframe.slice(1) + ' goal'
+                                  )
+                                ),
+                                // Category
+                                React.createElement('div', { className: "col-span-2 flex justify-center" },
+                                  React.createElement('span', {
+                                    className: "px-2 py-1 rounded-full text-xs font-medium",
+                                    style: { backgroundColor: task.categoryColor + '20', color: task.categoryColor }
+                                  }, task.category)
+                                ),
+                                // Sparkline
+                                React.createElement('div', { className: "col-span-3 flex justify-center" },
+                                  React.createElement('div', { className: "flex items-end gap-0.5 h-8" },
+                                    taskSparkline.map((val, i) => 
+                                      React.createElement('div', {
+                                        key: i,
+                                        className: "w-2 rounded-t transition-all",
+                                        style: {
+                                          height: Math.max((val / maxSparkline) * 100, 10) + '%',
+                                          backgroundColor: val > 0 ? task.categoryColor : '#e5e7eb',
+                                          minHeight: '3px'
+                                        },
+                                        title: `${val} completion${val !== 1 ? 's' : ''}`
+                                      })
                                     )
                                   )
                                 ),
-                                React.createElement('div', { className: "text-right" },
-                                  React.createElement('div', { className: "text-sm font-bold text-gray-900" }, 
-                                    statsTimePeriod !== 'all' ? `${task.periodCompletedCount} this ${statsTimePeriod}` : `${task.completedCount} total`
+                                // Count
+                                React.createElement('div', { className: "col-span-2 text-center" },
+                                  React.createElement('div', { className: "text-xl font-bold", style: { color: task.categoryColor } }, 
+                                    task.periodCompletedCount
                                   ),
-                                  React.createElement('div', { 
-                                    className: `text-xs ${task.completed ? 'text-green-600' : 'text-gray-500'}`
-                                  }, task.completed ? 'âœ“ Completed' : 'In Progress')
+                                  React.createElement('div', { className: "text-xs text-gray-500" }, 
+                                    task.completedCount + ' total'
+                                  )
+                                ),
+                                // Progress
+                                React.createElement('div', { className: "col-span-1 text-right" },
+                                  progressPercent !== null 
+                                    ? React.createElement('div', {},
+                                        React.createElement('div', { className: "text-sm font-bold text-gray-900" }, Math.round(progressPercent) + '%'),
+                                        React.createElement('div', { className: "w-full h-1.5 bg-gray-200 rounded-full mt-1" },
+                                          React.createElement('div', {
+                                            className: "h-full rounded-full",
+                                            style: { width: progressPercent + '%', backgroundColor: task.categoryColor }
+                                          })
+                                        )
+                                      )
+                                    : React.createElement('span', { className: "text-xs text-gray-400" }, '-')
                                 )
                               );
                             })
                         )
                       )
-                ),
+                    ),
                     
                     // Category Analysis Tab  
                     statsTab === 'categories' && React.createElement('div', {},
@@ -2778,7 +3149,7 @@
                                 className: "w-12 h-12 rounded-xl flex items-center justify-center",
                                 style: { backgroundColor: color + '20' }
                               },
-                                cat?.icon && React.createElement(cat.icon, { size: 24, style: { color: color } })
+                                cat?.icon && typeof cat.icon === 'function' && React.createElement(cat.icon, { size: 24, style: { color: color } })
                               ),
                               React.createElement('div', { className: "flex-1" },
                                 React.createElement('div', { className: "font-bold text-gray-900" }, stat.category),
@@ -2805,7 +3176,7 @@
                               rate <= 15 && React.createElement('div', { className: "text-right text-xs font-bold", style: { color: color } }, rate + '%')
                             ),
                             React.createElement('div', { className: "mt-4 pt-4 border-t border-gray-100 flex justify-between text-xs" },
-                              React.createElement('span', { className: "text-green-600 font-medium" }, `âœ“ ${stat.completed} compl`),
+                              React.createElement('span', { className: "text-green-600 font-medium" }, `${stat.completed} completed`),
                               React.createElement('span', { className: "text-gray-500" }, `${stat.pending} pending`)
                             )
                           );
@@ -2833,11 +3204,11 @@
                                 React.createElement('div', { className: "flex-1" },
                                   React.createElement('div', { className: "font-medium text-gray-900" }, goal.text),
                                   React.createElement('div', { className: "text-xs text-gray-600" }, 
-                                    goal.timeframe.charAt(0).toUpperCase() + goal.timeframe.slice(1) + ' â€¢ ' + goal.time
+                                    goal.timeframe.charAt(0).toUpperCase() + goal.timeframe.slice(1) + ' | ' + goal.time
                                   )
                                 ),
                                 React.createElement('div', { className: `text-xs font-medium ${goal.completed ? 'text-green-600' : 'text-gray-500'}` },
-                                  goal.completed ? 'âœ" Completed' : 'Active'
+                                  goal.completed ? 'Completed' : 'Active'
                                 )
                               );
                             })
@@ -3064,3 +3435,4 @@
     </script>
 </body>
 </html>
+

@@ -51,5 +51,5 @@ Proof that I actually read those textbooks
 [Textbook Solutions](https://github.com/nikolaosJP/Projects/tree/main/Textbook-Exercises): Worked solutions from "Applied Predictive Modeling" and "Introduction to Statistical Learning." Because the best way to learn is by doing (and then documenting it).
 
 
-**Note:** All projects are here for educational and research purposes. Feel free to explore, fork, and improve! Found a bug? That's a feature in disguise. Just kidding—submit an issue.
+**Note:** All projects are here for educational and research purposes. Feel free to explore, fork, and improve! Found a bug? That's a feature in disguise. Just kidding, submit an issue!
 

@@ -1,295 +1,75 @@
 {
   "goals": [
     {
-      "id": 1759638686079,
-      "text": "Read 10 books",
-      "time": "Anytime",
+      "id": 1766739876363,
+      "text": "Wake up",
+      "time": "07:00",
       "completed": false,
-      "category": "education",
+      "category": "custom-1766739865931",
       "priority": 0,
-      "timeframe": "annual",
+      "timeframe": "daily",
       "recurring": false,
-      "recurringDays": null,
       "completedDates": [],
-      "targetCompletions": 10
+      "targetCompletions": null,
+      "startDateTime": "2025-12-26T07:00",
+      "endDateTime": "2025-12-26T07:00",
+      "isReminder": true
     },
     {
-      "id": 1759638703822,
-      "text": "Finish 2 ukelele songs",
-      "time": "Anytime",
-      "completed": false,
-      "category": "custom-1759653911906",
+      "id": 1766739892316,
+      "text": "Exercise",
+      "time": "07:00",
+      "completed": true,
+      "category": "health",
       "priority": 0,
-      "timeframe": "annual",
+      "timeframe": "daily",
       "recurring": false,
-      "recurringDays": null,
-      "completedDates": [],
-      "targetCompletions": 2,
-      "startDate": "2025-10-05",
-      "endDate": "2025-10-05"
+      "completedDates": [
+        "2025-12-26"
+      ],
+      "targetCompletions": null,
+      "startDateTime": "2025-12-26T07:00",
+      "endDateTime": "2025-12-26T08:00",
+      "isReminder": false
     },
     {
-      "id": 1759638756796,
-      "text": "Finish 60 leetcode problems",
-      "time": "Anytime",
+      "id": 1766741500721,
+      "text": "Eat breakfast",
+      "time": "08:00",
+      "completed": false,
+      "category": "health",
+      "priority": 0,
+      "timeframe": "daily",
+      "recurring": false,
+      "completedDates": [],
+      "targetCompletions": null,
+      "startDateTime": "2025-12-26T08:00",
+      "endDateTime": "2025-12-26T08:15",
+      "isReminder": false
+    },
+    {
+      "id": 1766741550055,
+      "text": "Send resume x 10",
+      "time": "08:15",
       "completed": false,
       "category": "career",
-      "priority": 2,
-      "timeframe": "annual",
+      "priority": 0,
+      "timeframe": "daily",
       "recurring": false,
-      "recurringDays": null,
-      "completedDates": [],
-      "targetCompletions": 60
-    },
-    {
-      "id": 1759653863524,
-      "text": "Exercise",
-      "time": "Anytime",
-      "startTime": "07:01",
-      "endTime": "07:44",
-      "completed": false,
-      "category": "health",
-      "priority": 2,
-      "timeframe": "weekly",
-      "recurring": true,
-      "recurringDays": [
-        1,
-        3,
-        5
-      ],
       "completedDates": [],
       "targetCompletions": null,
-      "startDate": "2025-10-05",
-      "endDate": "2025-12-31",
-      "nonCompletable": false
-    },
+      "startDateTime": "2025-12-26T08:15",
+      "endDateTime": "2025-12-26T10:00",
+      "isReminder": false
+    }
+  ],
+  "notes": [
     {
-      "id": 1759655546161,
-      "text": "Stretching",
-      "time": "Anytime",
-      "startTime": "07:45",
-      "endTime": "08:00",
-      "startDate": "2025-10-05",
-      "endDate": "2025-12-31",
-      "completed": false,
-      "category": "health",
-      "priority": 2,
-      "timeframe": "daily",
-      "recurring": true,
-      "recurringDays": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6
-      ],
-      "completedDates": [],
-      "targetCompletions": null
-    },
-    {
-      "id": 1759656450936,
-      "text": "Finish all the reading material",
-      "time": "Anytime",
-      "startDate": "2025-10-05",
-      "endDate": "2025-10-31",
-      "completed": false,
-      "category": "custom-1759656397217",
-      "priority": 0,
-      "timeframe": "monthly",
-      "recurring": false,
-      "recurringDays": null,
-      "completedDates": [],
-      "targetCompletions": null
-    },
-    {
-      "id": 1759659078983,
-      "text": "Eat breakfast",
-      "time": "05:00",
-      "startTime": "05:00",
-      "endTime": "07:00",
-      "startDate": "2025-10-06",
-      "completed": true,
-      "category": "scheduling",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": false,
-      "recurringDays": null,
-      "completedDates": [
-        "2025-10-06",
-        "2025-11-18"
-      ],
-      "nonCompletable": true
-    },
-    {
-      "id": 1759659113951,
-      "text": "Eat breakfast",
-      "time": "05:00",
-      "startDate": "2025-10-05",
-      "endDate": "2025-10-05",
-      "completed": true,
-      "category": "scheduling",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": false,
-      "recurringDays": null,
-      "completedDates": [
-        "2025-11-18"
-      ],
-      "targetCompletions": null
-    },
-    {
-      "id": 1759659136474,
-      "text": "breakfast",
-      "time": "00:00",
-      "startTime": "00:00",
-      "endTime": "04:00",
-      "startDate": "2025-10-05",
-      "completed": true,
-      "category": "scheduling",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": false,
-      "recurringDays": null,
-      "completedDates": [
-        "2025-10-05",
-        "2025-11-18"
-      ],
-      "nonCompletable": false
-    },
-    {
-      "id": 1759666765668,
-      "text": "Wake up",
-      "time": "Anytime",
-      "startTime": "07:00",
-      "endTime": "07:00",
-      "startDate": "2025-10-05",
-      "endDate": "2025-12-31",
-      "completed": true,
-      "category": "custom-1759666727522",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": false,
-      "recurringDays": null,
-      "completedDates": [
-        "2025-11-18"
-      ],
-      "targetCompletions": null,
-      "nonCompletable": true
-    },
-    {
-      "id": 1759673422157,
-      "text": "Eat breakfast",
-      "time": "03:00",
-      "startTime": "08:01",
-      "endTime": "08:20",
-      "startDate": "2025-10-05",
-      "endDate": "2025-12-31",
-      "completed": true,
-      "category": "custom-1759666727522",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": true,
-      "recurringDays": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6
-      ],
-      "completedDates": [
-        "2025-10-06",
-        "2025-11-18"
-      ],
-      "targetCompletions": null,
-      "nonCompletable": true
-    },
-    {
-      "id": 1759673711890,
-      "text": "Study ",
-      "time": "Anytime",
-      "startTime": "08:21",
-      "endTime": "12:00",
-      "startDate": "2025-10-05",
-      "endDate": "2025-12-31",
-      "completed": false,
-      "category": "custom-1759666727522",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": true,
-      "recurringDays": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6
-      ],
-      "completedDates": [
-        "2025-11-18"
-      ],
-      "targetCompletions": null,
-      "nonCompletable": true
-    },
-    {
-      "id": 1759677835334,
-      "text": "Eating lunch",
-      "time": "Anytime",
-      "startTime": "12:01",
-      "endTime": "13:00",
-      "startDate": "2025-10-05",
-      "endDate": "2025-12-31",
-      "completed": true,
-      "category": "custom-1759666727522",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": true,
-      "recurringDays": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6
-      ],
-      "completedDates": [
-        "2025-11-18"
-      ],
-      "targetCompletions": null,
-      "nonCompletable": true
-    },
-    {
-      "id": 1759677922745,
-      "text": "Leetcode",
-      "time": "Anytime",
-      "startTime": "13:01",
-      "endTime": "14:00",
-      "startDate": "2025-10-05",
-      "endDate": "2025-12-31",
-      "completed": true,
-      "category": "custom-1759666727522",
-      "priority": 0,
-      "timeframe": "daily",
-      "recurring": true,
-      "recurringDays": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6
-      ],
-      "completedDates": [
-        "2025-11-18"
-      ],
-      "targetCompletions": null,
-      "nonCompletable": true
+      "id": 1766739852214,
+      "title": "Imported Note",
+      "text": "Mission Log for 2025: Study Schedule\n\t1. Learn traditional ML models (OLS, Logistic Regression, basic statistics) [09/30]\n\t2. Learn more advanced ML models (decision trees, classification models, neural networks) [10/12]\n\t3. Begin math odyssey (linear algebra, probability, calculus) [10/30]\n\t4. Learn more about LLM architecture (attention mechanism, positional encoding, feed-forward blocks [11/15]\nPractice leetcode daily [12/30]",
+      "createdAt": "2025-12-26T09:04:12.214Z",
+      "updatedAt": "2025-12-26T09:04:12.214Z"
     }
   ],
   "defaultCategories": [
@@ -298,13 +78,6 @@
       "name": "Health & Fitness",
       "iconName": "Heart",
       "color": "#EF4444",
-      "isDefault": true
-    },
-    {
-      "id": "education",
-      "name": "Education",
-      "iconName": "BookOpen",
-      "color": "#F59E0B",
       "isDefault": true
     },
     {
@@ -320,31 +93,38 @@
       "iconName": "DollarSign",
       "color": "#10B981",
       "isDefault": true
+    },
+    {
+      "id": "education",
+      "name": "Education",
+      "iconName": "BookOpen",
+      "color": "#F59E0B",
+      "isDefault": true
+    },
+    {
+      "id": "relationships",
+      "name": "Relationships",
+      "iconName": "Users",
+      "color": "#8B5CF6",
+      "isDefault": true
+    },
+    {
+      "id": "personal",
+      "name": "Personal",
+      "iconName": "Home",
+      "color": "#06B6D4",
+      "isDefault": true
     }
   ],
   "customCategories": [
     {
-      "id": "custom-1759653911906",
-      "name": "Play",
+      "id": "custom-1766739865931",
+      "name": "Reminders",
       "iconName": "Target",
-      "color": "#8B5CF6",
-      "isDefault": false
-    },
-    {
-      "id": "custom-1759656397217",
-      "name": "Monthly Goals",
-      "iconName": "Calendar",
-      "color": "#4A90E2",
-      "isDefault": false
-    },
-    {
-      "id": "custom-1759666727522",
-      "name": "Schedule",
-      "iconName": "Clock",
       "color": "#8B5CF6",
       "isDefault": false
     }
   ],
-  "notes": "Mission Log for 2025: Study Schedule\n\t1. Learn traditional ML models (OLS, Logistic Regression, basic statistics) [09/30]\n\t2. Learn more advanced ML models (decision trees, classification models, neural networks) [10/12]\n\t3. Begin math odyssey (linear algebra, probability, calculus) [10/30]\n\t4. Learn more about LLM architecture (attention mechanism, positional encoding, feed-forward blocks [11/15]\nPractice leetcode daily [12/30]",
-  "lastSaved": "2025-11-18T09:01:17.479Z"
+  "categoryOrder": [],
+  "lastSaved": "2025-12-26T09:32:43.086Z"
 }
