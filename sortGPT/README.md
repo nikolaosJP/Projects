@@ -1,11 +1,11 @@
-# customGPT
+# sortGPT
 
 Small GPT-style training repo with a tiny character-level "sort digits" dataset.
 Inspired by Andrej Karpathy's nanoGPT repo found here: `https://github.com/karpathy/nanoGPT/tree/master`.
 
 ## Introduction
 
-customGPT is a tiny, end-to-end GPT training sandbox: it generates a synthetic
+sortGPT is a tiny, end-to-end GPT training sandbox: it generates a synthetic
 character-level dataset where inputs are digit sequences and targets are their
 sorted versions (e.g., `3 1 2 -> 1 2 3`), then trains a GPT-style model to learn
 that mapping. The goal is clarity over scale, so you can see the entire pipeline
