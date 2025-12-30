@@ -9,8 +9,11 @@ Welcome to my digital workshop! This is where I build things that range from "te
 Teaching computers to do cool stuff (and occasionally debugging why they do weird stuff)
 </h6>
 
+**LLMs**
+[sortGPT](https://github.com/nikolaosJP/Projects/tree/main/sortGPT): A tiny GPT-style training sandbox that learns to sort digit sequences end-to-end.
+
 **Neural Networks**  
-[MNIST Digit Classification](https://github.com/nikolaosJP/Projects/tree/main/Exploring-MNIST-Dataset-with-MLPs): Built a multilayer perceptron that can read handwritten digits better than most doctors.
+[MNIST Digit Classification](https://github.com/nikolaosJP/Projects/tree/main/Exploring-MNIST-Dataset-with-MLPs): Built a multilayer perceptron that can read handwritten digits better than most doctors.  
 
 **Computer Vision**  
 [Anomaly Detection](https://github.com/nikolaosJP/Projects/tree/main/MVTec-Anomaly-Detection): Transfer learning with VGG16 to spot defects in manufacturing. Because even machines need quality control.  

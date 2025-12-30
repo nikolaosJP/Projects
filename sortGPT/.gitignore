@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.DS_Store
+
+out/
+out-*/
+*.pt
+
+data/*/train.bin
+data/*/val.bin
+data/*/input.txt
+data/*/meta.pkl
