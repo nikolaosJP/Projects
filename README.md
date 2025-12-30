@@ -9,7 +9,7 @@ Welcome to my digital workshop! This is where I build things that range from "te
 Teaching computers to do cool stuff (and occasionally debugging why they do weird stuff)
 </h6>
 
-**LLMs**
+**LLMs:**  
 [sortGPT](https://github.com/nikolaosJP/Projects/tree/main/sortGPT): A tiny GPT-style training sandbox that learns to sort digit sequences end-to-end.
 
 **Neural Networks**  
