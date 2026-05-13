@@ -41,10 +41,19 @@ class KMeansClustering {
 
   initialize() {
     const { points, pointNames } = this.manager.getDataFromApp();
-    if (points.length < 2) throw new Error('Need at least 2 points! Click on canvas to add.');
+    if (points.length < 2) {
+      window.showToast('Add at least 2 points to the canvas first.', 'warn');
+      return;
+    }
 
-    const k = parseInt(document.getElementById('kmeans-k').value);
-    if (k > points.length) throw new Error('K cannot exceed number of points!');
+    const kInput = document.getElementById('kmeans-k');
+    let k = parseInt(kInput.value);
+    if (isNaN(k) || k < 1) k = 1;
+    if (k > points.length) {
+      window.showToast(`K (${k}) exceeds point count (${points.length}); using K=${points.length}.`, 'warn');
+      k = points.length;
+      kInput.value = k;
+    }
 
     // Initialize K random centers using k-means++ style
     this.centers = [];
@@ -143,7 +152,10 @@ c_i = \\arg\\min_j \\|\\mathbf{x}_i - \\boldsymbol{\\mu}_j\\|^2\\\\
   }
 
   trainIteration() {
-    if (!this.initialized) throw new Error('Initialize first!');
+    if (!this.initialized) {
+      window.showToast('Click "Initialize" before iterating.', 'warn');
+      return;
+    }
 
     const { points, pointNames } = this.manager.getDataFromApp();
     const k = this.centers.length;
@@ -422,7 +434,7 @@ c_i = \\arg\\min_j \\|\\mathbf{x}_i - \\boldsymbol{\\mu}_j\\|^2\\\\
         this.autoTimeoutId = setTimeout(runStep, 200);
       } catch (e) {
         this.stopAutoRun();
-        alert(e.message);
+        window.showToast(e.message, 'error');
       }
     };
 
@@ -452,12 +464,21 @@ class HierarchicalClustering {
 
   computeClustering() {
     const { points, pointNames } = this.manager.getDataFromApp();
-    if (points.length < 2) throw new Error('Need at least 2 points! Click on canvas to add.');
+    if (points.length < 2) {
+      window.showToast('Add at least 2 points to the canvas first.', 'warn');
+      return;
+    }
 
     const linkage = document.getElementById('hierarchical-linkage').value;
-    const nClusters = parseInt(document.getElementById('hierarchical-n-clusters').value);
+    const nClustersInput = document.getElementById('hierarchical-n-clusters');
+    let nClusters = parseInt(nClustersInput.value);
+    if (isNaN(nClusters) || nClusters < 1) nClusters = 1;
 
-    if (nClusters > points.length) throw new Error('Number of clusters cannot exceed number of points!');
+    if (nClusters > points.length) {
+      window.showToast(`Cluster count (${nClusters}) exceeds point count (${points.length}); using ${points.length}.`, 'warn');
+      nClusters = points.length;
+      nClustersInput.value = nClusters;
+    }
 
     const n = points.length;
 

@@ -45,15 +45,26 @@ class OLSSolver {
     document.getElementById('ols-calculations').style.display = 'block';
   }
 
-  updateDisplay(points, model) {
+  updateDisplay(points, model, testPoints) {
     document.getElementById('ols-m').textContent = model.fitted ? model.m.toFixed(6) : '—';
     document.getElementById('ols-b').textContent = model.fitted ? model.b.toFixed(6) : '—';
-    
+
     if (model.fitted && points.length) {
       const mse = AppUtils.calculateMSE(points, model.m, model.b);
       const r2 = AppUtils.calculateR2(points, model.m, model.b);
-      document.getElementById('ols-mse').textContent = mse.toFixed(6);
-      document.getElementById('ols-r2').textContent = r2.toFixed(6);
+      const fmtMse = mse.toFixed(6);
+      const fmtR2 = r2.toFixed(6);
+      if (testPoints && testPoints.length) {
+        const mseTest = AppUtils.calculateMSE(testPoints, model.m, model.b);
+        const r2Test = AppUtils.calculateR2(testPoints, model.m, model.b);
+        document.getElementById('ols-mse').innerHTML =
+          `<span title="Train">${fmtMse}</span> <span style="color:var(--warning)" title="Test (${testPoints.length})">${mseTest.toFixed(6)}</span>`;
+        document.getElementById('ols-r2').innerHTML =
+          `<span title="Train">${fmtR2}</span> <span style="color:var(--warning)" title="Test (${testPoints.length})">${r2Test.toFixed(6)}</span>`;
+      } else {
+        document.getElementById('ols-mse').textContent = fmtMse;
+        document.getElementById('ols-r2').textContent = fmtR2;
+      }
     }
   }
 }

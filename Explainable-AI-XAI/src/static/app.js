@@ -12,7 +12,7 @@ class App {
     this.showResiduals = true;
     this.activeLogisticGroup = 0; // Currently selected group for logistic regression (0 or 1)
     this.activeNLClass = 0; // Currently selected class for nonlinear classification (0 or 1)
-    this.nlTaskType = { dt: 'regression', rf: 'regression', xgb: 'regression', nn: 'regression' }; // Task type for each NL model
+    this.nlTaskType = { dt: 'regression', rf: 'regression', xgb: 'regression', nn: 'regression', rnn: 'regression', lstm: 'regression' }; // Task type for each NL model
 
     this.models = {
       ols: {m: 0, b: 0, fitted: false},
@@ -22,7 +22,9 @@ class App {
       dt: {fitted: false, tree: null},
       rf: {fitted: false, trees: [], oobIndices: []},
       xgb: {fitted: false, trees: [], basePrediction: 0, iteration: 0},
-      nn: {fitted: false, weights: [], biases: [], epoch: 0}
+      nn: {fitted: false, weights: [], biases: [], epoch: 0},
+      rnn: {fitted: false, predictions: []},
+      lstm: {fitted: false, predictions: []}
     };
 
     // Statistics data storage
@@ -49,6 +51,13 @@ class App {
     this.kMeansClustering = new KMeansClustering(this.clusteringManager);
     this.hierarchicalClustering = new HierarchicalClustering(this.clusteringManager);
     this.clusteringPoints = [];
+
+    this.transformerDemo = new TransformerDemo();
+    this.ragDemo = new RAGDemo();
+    this.activeLLMTab = 'transformer';
+
+    this.rnn = new VanillaRNN();
+    this.lstm = new LSTM();
 
     this.setupEventHandlers();
     this.initializeFormulas();
@@ -84,6 +93,29 @@ class App {
         if (tab.dataset.subtab) this.switchStatTab(tab.dataset.subtab);
       });
     });
+
+    // LLM subtabs
+    document.querySelectorAll('.tab[data-llmtab]').forEach(tab => {
+      tab.addEventListener('click', () => {
+        if (tab.dataset.llmtab) this.switchLLMTab(tab.dataset.llmtab);
+      });
+    });
+
+    // Transformer controls
+    const trInit = document.getElementById('tr-init');
+    if (trInit) trInit.onclick = () => this.initTransformer();
+    const trNext = document.getElementById('tr-next');
+    if (trNext) trNext.onclick = () => this.nextTransformerStep();
+    const trRun = document.getElementById('tr-run');
+    if (trRun) trRun.onclick = () => this.runTransformer();
+    const trReset = document.getElementById('tr-reset');
+    if (trReset) trReset.onclick = () => this.resetTransformer();
+
+    // RAG controls
+    const ragRun = document.getElementById('rag-run');
+    if (ragRun) ragRun.onclick = () => this.runRAG();
+    const ragReset = document.getElementById('rag-reset');
+    if (ragReset) ragReset.onclick = () => this.resetRAG();
 
     // OLS Controls
     document.getElementById('solve-ols').onclick = () => this.solveOLS();
@@ -142,6 +174,30 @@ class App {
     document.getElementById('nn-task-cls').onclick = () => this.setNLTask('nn', 'classification');
     document.getElementById('nn-class0-btn').onclick = () => this.setNLClass('nn', 0);
     document.getElementById('nn-class1-btn').onclick = () => this.setNLClass('nn', 1);
+
+    // RNN Controls
+    const initRnn = document.getElementById('init-rnn');
+    if (initRnn) initRnn.onclick = () => this.initRNN();
+    const nextRnn = document.getElementById('next-step-rnn');
+    if (nextRnn) nextRnn.onclick = () => this.nextStepRNN();
+    const runRnn = document.getElementById('run-rnn');
+    if (runRnn) runRnn.onclick = () => this.runRNN();
+    const trainRnn = document.getElementById('train-rnn');
+    if (trainRnn) trainRnn.onclick = () => this.trainRNN();
+    const resetRnn = document.getElementById('reset-rnn');
+    if (resetRnn) resetRnn.onclick = () => this.resetRNN();
+
+    // LSTM Controls
+    const initLstm = document.getElementById('init-lstm');
+    if (initLstm) initLstm.onclick = () => this.initLSTM();
+    const nextLstm = document.getElementById('next-step-lstm');
+    if (nextLstm) nextLstm.onclick = () => this.nextStepLSTM();
+    const runLstm = document.getElementById('run-lstm');
+    if (runLstm) runLstm.onclick = () => this.runLSTM();
+    const trainLstm = document.getElementById('train-lstm');
+    if (trainLstm) trainLstm.onclick = () => this.trainLSTM();
+    const resetLstm = document.getElementById('reset-lstm');
+    if (resetLstm) resetLstm.onclick = () => this.resetLSTM();
 
     // Statistics Controls - Correlation
     document.getElementById('calc-correlation').onclick = () => this.calculateCorrelation();
@@ -222,16 +278,122 @@ class App {
       };
     }
 
-    // Keyboard controls for ANOVA group selection
+    // Train/test split controls
+    this.split = { enabled: false, fraction: 0.2, salt: 1 };
+    const splitEnabled = document.getElementById('split-enabled');
+    const splitFraction = document.getElementById('split-fraction');
+    const splitLabel = document.getElementById('split-fraction-label');
+    const splitReshuffle = document.getElementById('split-reshuffle');
+    if (splitEnabled) {
+      splitEnabled.onchange = e => {
+        this.split.enabled = e.target.checked;
+        const legend = document.getElementById('split-legend');
+        if (legend) legend.style.display = this.split.enabled ? 'inline-flex' : 'none';
+        this.recomputeSplit();
+        this.redrawCanvas();
+      };
+    }
+    if (splitFraction) {
+      splitFraction.oninput = e => {
+        this.split.fraction = parseFloat(e.target.value);
+        if (splitLabel) splitLabel.textContent = `${Math.round(this.split.fraction * 100)}%`;
+        if (this.split.enabled) {
+          this.recomputeSplit();
+          this.redrawCanvas();
+        }
+      };
+    }
+    if (splitReshuffle) {
+      splitReshuffle.onclick = () => {
+        this.split.salt = (this.split.salt + 1) | 0;
+        if (this.split.enabled) {
+          this.recomputeSplit();
+          this.redrawCanvas();
+        }
+      };
+    }
+
+    // Theme toggle
+    const themeBtn = document.getElementById('theme-toggle');
+    if (themeBtn) {
+      themeBtn.onclick = () => {
+        const cur = document.documentElement.getAttribute('data-theme') || 'light';
+        const next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('xai-theme', next); } catch (e) {}
+        this.redrawCanvas();
+      };
+    }
+
+    // Keyboard controls
     document.addEventListener('keydown', (e) => {
+      // ANOVA group selection
       if (this.activeTab === 'stats' && this.activeStatTab === 'anova') {
         const key = parseInt(e.key);
         if (key >= 1 && key <= 5) {
           this.statData.anova.activeGroup = key - 1;
           document.getElementById('anova-active-group').textContent = key;
+          return;
+        }
+      }
+      // Tab navigation with arrow keys when a tab has focus
+      const target = e.target;
+      if (target && target.classList && target.classList.contains('tab') && target.dataset.tab) {
+        const tabs = Array.from(document.querySelectorAll('.tab[data-tab]'));
+        const idx = tabs.indexOf(target);
+        if (idx >= 0) {
+          let next = idx;
+          if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+          else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+          else if (e.key === 'Enter' || e.key === ' ') { target.click(); e.preventDefault(); return; }
+          if (next !== idx) {
+            tabs[next].focus();
+            tabs[next].click();
+            e.preventDefault();
+          }
         }
       }
     });
+  }
+
+  // Public: return a fresh redraw of the active tab
+  redraw() {
+    if (this.redrawCanvas) this.redrawCanvas();
+  }
+
+  // Deterministic 0-1 hash from (index, salt, pointCount)
+  _splitHash(i, n) {
+    let h = (i * 2654435761) ^ (this.split.salt * 374761393) ^ (n * 668265263);
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h / 4294967295;
+  }
+
+  // Mark each point with isTest = true/false based on current split state
+  recomputeSplit() {
+    if (!this.points) return;
+    const n = this.points.length;
+    if (!this.split.enabled || n < 4) {
+      this.points.forEach(p => { p.isTest = false; });
+      return;
+    }
+    this.points.forEach((p, i) => {
+      // Use the user-flagged value if the point was added with shift; otherwise hash
+      if (p.userTest) { p.isTest = true; return; }
+      p.isTest = this._splitHash(i, n) < this.split.fraction;
+    });
+  }
+
+  getTrainPoints() {
+    if (!this.points) return [];
+    if (!this.split.enabled) return this.points;
+    return this.points.filter(p => !p.isTest);
+  }
+
+  getTestPoints() {
+    if (!this.points) return [];
+    if (!this.split.enabled) return [];
+    return this.points.filter(p => p.isTest);
   }
 
   switchTab(tab) {
@@ -243,10 +405,11 @@ class App {
     if (tabContent) tabContent.classList.add('active');
     this.activeTab = tab;
 
-    // Hide general controls for Recommendation Systems and Clustering tabs
+    // Hide general controls for tabs that don't use the shared point canvas
     const generalControls = document.getElementById('general-controls-panel');
     if (generalControls) {
-      generalControls.style.display = (tab === 'recsys' || tab === 'clustering') ? 'none' : 'block';
+      const noCanvas = (tab === 'recsys' || tab === 'clustering' || tab === 'llms');
+      generalControls.style.display = noCanvas ? 'none' : 'block';
     }
 
     // Redraw canvas when switching tabs
@@ -289,6 +452,69 @@ class App {
     this.redrawCanvas();
   }
 
+  switchLLMTab(llmtab) {
+    document.querySelectorAll('.tab[data-llmtab]').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.llmtab-content').forEach(t => t.classList.remove('active'));
+    const btn = document.querySelector(`[data-llmtab="${llmtab}"]`);
+    if (btn) btn.classList.add('active');
+    const content = document.getElementById(`llmtab-${llmtab}`);
+    if (content) content.classList.add('active');
+    this.activeLLMTab = llmtab;
+  }
+
+  // ---- Transformer ----
+  initTransformer() {
+    const sentence = document.getElementById('tr-sentence').value;
+    let dim = parseInt(document.getElementById('tr-dim').value);
+    let seed = parseInt(document.getElementById('tr-seed').value);
+    if (!Number.isFinite(dim) || dim < 2) dim = 2;
+    if (dim > 8) dim = 8;
+    if (!Number.isFinite(seed)) seed = 42;
+    this.transformerDemo.resetUI();
+    const ok = this.transformerDemo.initialize(sentence, dim, seed);
+    if (!ok) return;
+    document.getElementById('tr-next').disabled = false;
+    document.getElementById('tr-run').disabled = false;
+    document.getElementById('tr-step-name').textContent = 'Initialized';
+  }
+
+  nextTransformerStep() {
+    const name = this.transformerDemo.nextStep();
+    if (!name) {
+      window.showToast('Pipeline complete. Click Reset to start again.', 'info');
+      document.getElementById('tr-next').disabled = true;
+    }
+  }
+
+  runTransformer() {
+    if (!this.transformerDemo.state) {
+      this.initTransformer();
+    }
+    this.transformerDemo.runAll();
+    document.getElementById('tr-next').disabled = true;
+    document.getElementById('tr-step-name').textContent = 'Done';
+  }
+
+  resetTransformer() {
+    this.transformerDemo.reset();
+    this.transformerDemo.resetUI();
+    document.getElementById('tr-next').disabled = true;
+    document.getElementById('tr-run').disabled = true;
+  }
+
+  // ---- RAG ----
+  runRAG() {
+    const corpus = document.getElementById('rag-corpus').value;
+    const query = document.getElementById('rag-query').value;
+    let topK = parseInt(document.getElementById('rag-topk').value);
+    if (!Number.isFinite(topK) || topK < 1) topK = 1;
+    this.ragDemo.run(corpus, query, topK);
+  }
+
+  resetRAG() {
+    this.ragDemo.resetUI();
+  }
+
   setNLTask(model, task) {
     this.nlTaskType[model] = task;
     // Update UI
@@ -320,7 +546,8 @@ class App {
       const minSamples = parseInt(document.getElementById('dt-min-samples').value);
       const taskType = this.nlTaskType.dt;
 
-      this.models.dt = this.decisionTree.fit(this.points, taskType, maxDepth, minSamples);
+      const train = this.getTrainPoints();
+      this.models.dt = this.decisionTree.fit(train, taskType, maxDepth, minSamples);
 
       // Display build steps
       const stepsDisplay = document.getElementById('dt-step-display');
@@ -331,7 +558,7 @@ class App {
         AppUtils.kRenderInlineFormulas(stepsDisplay);
       }
 
-      this.decisionTree.updateDisplay(this.points, this.models.dt, taskType);
+      this.decisionTree.updateDisplay(train, this.models.dt, taskType);
       this.canvas.drawNL('dt', this.points, this.models, taskType);
 
       document.getElementById('dt-metrics').style.display = 'block';
@@ -344,7 +571,7 @@ class App {
         document.getElementById('dt-cls-metrics').style.display = 'grid';
       }
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -366,7 +593,8 @@ class App {
       const maxFeatures = parseInt(document.getElementById('rf-max-features').value);
       const taskType = this.nlTaskType.rf;
 
-      this.models.rf = this.randomForest.fit(this.points, taskType, nTrees, maxDepth, minSamples, maxFeatures);
+      const train = this.getTrainPoints();
+      this.models.rf = this.randomForest.fit(train, taskType, nTrees, maxDepth, minSamples, maxFeatures);
 
       // Display build steps
       const stepsDisplay = document.getElementById('rf-step-display');
@@ -377,7 +605,7 @@ class App {
         AppUtils.kRenderInlineFormulas(stepsDisplay);
       }
 
-      this.randomForest.updateDisplay(this.points, this.models.rf, taskType);
+      this.randomForest.updateDisplay(train, this.models.rf, taskType);
       this.canvas.drawNL('rf', this.points, this.models, taskType);
 
       document.getElementById('rf-metrics').style.display = 'block';
@@ -390,7 +618,7 @@ class App {
         document.getElementById('rf-cls-metrics').style.display = 'grid';
       }
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -407,7 +635,7 @@ class App {
   initXGB() {
     try {
       const taskType = this.nlTaskType.xgb;
-      this.models.xgb = this.xgboost.initialize(this.points, taskType);
+      this.models.xgb = this.xgboost.initialize(this.getTrainPoints(), taskType);
       document.getElementById('next-boost-xgb').disabled = false;
       document.getElementById('xgb-iteration').textContent = '0';
       document.getElementById('xgb-tree-count').textContent = '0';
@@ -424,7 +652,7 @@ class App {
       this.canvas.drawNL('xgb', this.points, this.models, taskType);
       this.drawXGBLossPlot();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -443,7 +671,8 @@ class App {
         stepsDisplay.innerHTML += '<br><strong>Boosting Iterations:</strong><br>';
       }
 
-      this.models.xgb = this.xgboost.executeBoost(this.points, this.models.xgb, taskType, lr, maxDepth, lambda, gamma, subsample);
+      const train = this.getTrainPoints();
+      this.models.xgb = this.xgboost.executeBoost(train, this.models.xgb, taskType, lr, maxDepth, lambda, gamma, subsample);
 
       // Append step information
       if (stepsDisplay && this.models.xgb.currentStepDisplay) {
@@ -452,7 +681,7 @@ class App {
         AppUtils.kRenderInlineFormulas(stepsDisplay);
       }
 
-      this.xgboost.updateDisplay(this.points, this.models.xgb, taskType);
+      this.xgboost.updateDisplay(train, this.models.xgb, taskType);
       this.canvas.drawNL('xgb', this.points, this.models, taskType);
       this.drawXGBLossPlot();
 
@@ -473,7 +702,7 @@ class App {
         setTimeout(() => this.nextBoostXGB(), 100);
       }
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
       this.xgboost.stopAutoRun();
     }
   }
@@ -485,7 +714,7 @@ class App {
       document.getElementById('auto-xgb').classList.remove('warning');
     } else {
       if (!this.models.xgb.fitted) {
-        alert('Initialize first!');
+        window.showToast('Click "Initialize" before stepping.', 'warn');
         return;
       }
       this.xgboost.startAutoRun();
@@ -521,14 +750,16 @@ class App {
       const hiddenSizesStr = document.getElementById('nn-hidden').value;
       const hiddenSizes = hiddenSizesStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
       if (hiddenSizes.length === 0) {
-        alert('Invalid hidden layer sizes. Use comma-separated positive integers (e.g., 4,3)');
+        window.showToast('Hidden layer sizes must be a comma-separated list of positive integers (e.g. "8,4").', 'warn');
         return;
       }
 
       const activation = document.getElementById('nn-activation').value;
       const taskType = this.nlTaskType.nn;
 
-      this.models.nn = this.neuralNetwork.initialize(this.points, taskType, hiddenSizes, activation);
+      const model = this.neuralNetwork.initialize(this.getTrainPoints(), taskType, hiddenSizes, activation);
+      if (!model) return; // Toast already shown by solver
+      this.models.nn = model;
       document.getElementById('next-epoch-nn').disabled = false;
       document.getElementById('nn-epoch').textContent = '0';
       document.getElementById('nn-params').textContent = this.models.nn.totalParams;
@@ -545,16 +776,24 @@ class App {
       this.canvas.drawNL('nn', this.points, this.models, taskType);
       this.drawNNLossPlot();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
   nextEpochNN() {
     try {
-      const lr = parseFloat(document.getElementById('nn-lr').value);
-      const lambda = parseFloat(document.getElementById('nn-lambda').value);
-      const dropout = parseFloat(document.getElementById('nn-dropout').value);
-      const maxEpochs = parseInt(document.getElementById('nn-max-epochs').value);
+      let lr = parseFloat(document.getElementById('nn-lr').value);
+      let lambda = parseFloat(document.getElementById('nn-lambda').value);
+      let dropout = parseFloat(document.getElementById('nn-dropout').value);
+      let maxEpochs = parseInt(document.getElementById('nn-max-epochs').value);
+      // Validate/clamp hyperparameters to a sane range
+      if (!isFinite(lr) || lr <= 0) lr = 1e-6;
+      lr = Math.min(Math.max(lr, 1e-6), 10);
+      if (!isFinite(lambda) || lambda < 0) lambda = 0;
+      if (!isFinite(dropout) || dropout < 0) dropout = 0;
+      if (dropout >= 1) dropout = 0.99;
+      if (!isFinite(maxEpochs) || maxEpochs < 1) maxEpochs = 1;
+      maxEpochs = Math.min(maxEpochs, 10000);
       const taskType = this.nlTaskType.nn;
 
       // If this is the first epoch, add a separator after the initial explanation
@@ -563,7 +802,8 @@ class App {
         stepsDisplay.innerHTML += '<br><strong>Training Epochs:</strong><br>';
       }
 
-      this.models.nn = this.neuralNetwork.trainEpoch(this.points, this.models.nn, taskType, lr, lambda, dropout);
+      const train = this.getTrainPoints();
+      this.models.nn = this.neuralNetwork.trainEpoch(train, this.models.nn, taskType, lr, lambda, dropout);
 
       // Append step information
       if (stepsDisplay && this.models.nn.currentStepDisplay) {
@@ -572,7 +812,7 @@ class App {
         AppUtils.kRenderInlineFormulas(stepsDisplay);
       }
 
-      this.neuralNetwork.updateDisplay(this.points, this.models.nn, taskType);
+      this.neuralNetwork.updateDisplay(train, this.models.nn, taskType);
       this.canvas.drawNL('nn', this.points, this.models, taskType);
       this.drawNNLossPlot();
 
@@ -596,7 +836,7 @@ class App {
         setTimeout(() => this.nextEpochNN(), 100);
       }
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
       this.neuralNetwork.stopAutoRun();
     }
   }
@@ -608,7 +848,7 @@ class App {
       document.getElementById('auto-nn').classList.remove('warning');
     } else {
       if (!this.models.nn.fitted) {
-        alert('Initialize first!');
+        window.showToast('Click "Initialize" before stepping.', 'warn');
         return;
       }
       this.neuralNetwork.startAutoRun();
@@ -637,8 +877,205 @@ class App {
     }
   }
 
+  // ---- RNN ----
+  initRNN() {
+    const train = this.getTrainPoints();
+    const hidden = parseInt(document.getElementById('rnn-hidden').value) || 4;
+    const seed = parseInt(document.getElementById('rnn-seed').value) || 42;
+    const ok = this.rnn.initialize(train, hidden, seed);
+    if (!ok) return;
+    this.models.rnn = { fitted: true, predictions: [] };
+    document.getElementById('next-step-rnn').disabled = false;
+    document.getElementById('run-rnn').disabled = false;
+    const trainBtn = document.getElementById('train-rnn');
+    if (trainBtn) trainBtn.disabled = false;
+    document.getElementById('rnn-step-count').textContent = '0';
+    document.getElementById('rnn-step-total').textContent = String(this.rnn.model.ys.length - 1);
+    document.getElementById('rnn-mse').textContent = '—';
+    this.rnn.renderWeights();
+    this.rnn.renderHistory();
+    this.canvas.drawNL('rnn', train, this.models, 'regression');
+  }
+
+  nextStepRNN() {
+    if (!this.rnn.model) { this.initRNN(); if (!this.rnn.model) return; }
+    const record = this.rnn.nextStep();
+    if (!record) {
+      window.showToast('End of sequence reached. Click Reset to start over.', 'info');
+      document.getElementById('next-step-rnn').disabled = true;
+      return;
+    }
+    this._refreshRNN(record);
+  }
+
+  runRNN() {
+    if (!this.rnn.model) { this.initRNN(); if (!this.rnn.model) return; }
+    this.rnn.runAll();
+    const last = this.rnn.history[this.rnn.history.length - 1];
+    this._refreshRNN(last);
+    document.getElementById('next-step-rnn').disabled = true;
+  }
+
+  _refreshRNN(record) {
+    document.getElementById('rnn-step-count').textContent = String(this.rnn.t);
+    this.rnn.renderStep(record);
+    this.rnn.renderHistory();
+    this.rnn.renderMetrics();
+    this.models.rnn = { fitted: true, predictions: this.rnn.predictionMarkers() };
+    this.canvas.drawNL('rnn', this.getTrainPoints(), this.models, 'regression');
+  }
+
+  resetRNN() {
+    this.rnn.reset();
+    this.models.rnn = { fitted: false, predictions: [] };
+    document.getElementById('next-step-rnn').disabled = true;
+    document.getElementById('run-rnn').disabled = true;
+    const trainBtn = document.getElementById('train-rnn');
+    if (trainBtn) trainBtn.disabled = true;
+    document.getElementById('rnn-step-count').textContent = '0';
+    document.getElementById('rnn-step-total').textContent = '0';
+    document.getElementById('rnn-mse').textContent = '—';
+    ['rnn-weights', 'rnn-step-detail', 'rnn-history'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.innerHTML = ''; if (el.parentElement) el.parentElement.style.display = 'none'; }
+    });
+    const lossWrap = document.getElementById('rnn-loss-wrap');
+    if (lossWrap) lossWrap.style.display = 'none';
+    this.canvas.drawNL('rnn', this.points, this.models, 'regression');
+  }
+
+  trainRNN() {
+    if (!this.rnn.model) { this.initRNN(); if (!this.rnn.model) return; }
+    let lr = parseFloat(document.getElementById('rnn-lr').value);
+    let epochs = parseInt(document.getElementById('rnn-epochs').value);
+    if (!Number.isFinite(lr) || lr <= 0) lr = 0.05;
+    lr = Math.min(Math.max(lr, 1e-4), 1);
+    if (!Number.isFinite(epochs) || epochs < 1) epochs = 1;
+    epochs = Math.min(epochs, 2000);
+    const btn = document.getElementById('train-rnn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Training…'; }
+    // Defer so the UI updates before the heavy synchronous work.
+    setTimeout(() => {
+      try {
+        const lossHistory = this.rnn.train(epochs, lr);
+        // Pull the freshly-recomputed history (re-forwarded by train()).
+        const last = this.rnn.history[this.rnn.history.length - 1];
+        this._refreshRNN(last);
+        this.models.rnn.lossHistory = lossHistory;
+        const wrap = document.getElementById('rnn-loss-wrap');
+        if (wrap) wrap.style.display = 'block';
+        this.canvas.drawLossPlot(lossHistory, 'rnn-loss-plot');
+        const final = lossHistory[lossHistory.length - 1];
+        const initial = lossHistory[0];
+        window.showToast(`Trained ${epochs} epochs: MSE ${initial.toFixed(3)} → ${final.toFixed(3)}.`, 'info', 4000);
+      } catch (e) {
+        window.showToast('Training failed: ' + e.message, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Train'; }
+      }
+    }, 30);
+  }
+
+  // ---- LSTM ----
+  initLSTM() {
+    const train = this.getTrainPoints();
+    const hidden = parseInt(document.getElementById('lstm-hidden').value) || 4;
+    const seed = parseInt(document.getElementById('lstm-seed').value) || 42;
+    const ok = this.lstm.initialize(train, hidden, seed);
+    if (!ok) return;
+    this.models.lstm = { fitted: true, predictions: [] };
+    document.getElementById('next-step-lstm').disabled = false;
+    document.getElementById('run-lstm').disabled = false;
+    const trainBtn = document.getElementById('train-lstm');
+    if (trainBtn) trainBtn.disabled = false;
+    document.getElementById('lstm-step-count').textContent = '0';
+    document.getElementById('lstm-step-total').textContent = String(this.lstm.model.ys.length - 1);
+    document.getElementById('lstm-mse').textContent = '—';
+    this.lstm.renderWeights();
+    this.lstm.renderHistory();
+    this.canvas.drawNL('lstm', train, this.models, 'regression');
+  }
+
+  nextStepLSTM() {
+    if (!this.lstm.model) { this.initLSTM(); if (!this.lstm.model) return; }
+    const record = this.lstm.nextStep();
+    if (!record) {
+      window.showToast('End of sequence reached. Click Reset to start over.', 'info');
+      document.getElementById('next-step-lstm').disabled = true;
+      return;
+    }
+    this._refreshLSTM(record);
+  }
+
+  runLSTM() {
+    if (!this.lstm.model) { this.initLSTM(); if (!this.lstm.model) return; }
+    this.lstm.runAll();
+    const last = this.lstm.history[this.lstm.history.length - 1];
+    this._refreshLSTM(last);
+    document.getElementById('next-step-lstm').disabled = true;
+  }
+
+  _refreshLSTM(record) {
+    document.getElementById('lstm-step-count').textContent = String(this.lstm.t);
+    this.lstm.renderStep(record);
+    this.lstm.renderHistory();
+    this.lstm.renderMetrics();
+    this.models.lstm = { fitted: true, predictions: this.lstm.predictionMarkers() };
+    this.canvas.drawNL('lstm', this.getTrainPoints(), this.models, 'regression');
+  }
+
+  resetLSTM() {
+    this.lstm.reset();
+    this.models.lstm = { fitted: false, predictions: [] };
+    document.getElementById('next-step-lstm').disabled = true;
+    document.getElementById('run-lstm').disabled = true;
+    const trainBtn = document.getElementById('train-lstm');
+    if (trainBtn) trainBtn.disabled = true;
+    document.getElementById('lstm-step-count').textContent = '0';
+    document.getElementById('lstm-step-total').textContent = '0';
+    document.getElementById('lstm-mse').textContent = '—';
+    ['lstm-weights', 'lstm-step-detail', 'lstm-history'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.innerHTML = ''; if (el.parentElement) el.parentElement.style.display = 'none'; }
+    });
+    const lossWrap = document.getElementById('lstm-loss-wrap');
+    if (lossWrap) lossWrap.style.display = 'none';
+    this.canvas.drawNL('lstm', this.points, this.models, 'regression');
+  }
+
+  trainLSTM() {
+    if (!this.lstm.model) { this.initLSTM(); if (!this.lstm.model) return; }
+    let lr = parseFloat(document.getElementById('lstm-lr').value);
+    let epochs = parseInt(document.getElementById('lstm-epochs').value);
+    if (!Number.isFinite(lr) || lr <= 0) lr = 0.05;
+    lr = Math.min(Math.max(lr, 1e-4), 1);
+    if (!Number.isFinite(epochs) || epochs < 1) epochs = 1;
+    epochs = Math.min(epochs, 2000);
+    const btn = document.getElementById('train-lstm');
+    if (btn) { btn.disabled = true; btn.textContent = 'Training…'; }
+    setTimeout(() => {
+      try {
+        const lossHistory = this.lstm.train(epochs, lr);
+        const last = this.lstm.history[this.lstm.history.length - 1];
+        this._refreshLSTM(last);
+        this.models.lstm.lossHistory = lossHistory;
+        const wrap = document.getElementById('lstm-loss-wrap');
+        if (wrap) wrap.style.display = 'block';
+        this.canvas.drawLossPlot(lossHistory, 'lstm-loss-plot');
+        const final = lossHistory[lossHistory.length - 1];
+        const initial = lossHistory[0];
+        window.showToast(`Trained ${epochs} epochs: MSE ${initial.toFixed(3)} → ${final.toFixed(3)}.`, 'info', 4000);
+      } catch (e) {
+        window.showToast('Training failed: ' + e.message, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Train'; }
+      }
+    }, 30);
+  }
+
   addPoint(point) {
     this.points.push(point);
+    this.recomputeSplit();
     this.redrawCanvas();
   }
 
@@ -692,26 +1129,28 @@ class App {
 
   solveOLS() {
     try {
-      this.models.ols = this.olsSolver.solve(this.points);
-      this.olsSolver.displaySteps(this.points, this.models.ols);
-      this.olsSolver.updateDisplay(this.points, this.models.ols);
+      const train = this.getTrainPoints();
+      const test = this.getTestPoints();
+      this.models.ols = this.olsSolver.solve(train);
+      this.olsSolver.displaySteps(train, this.models.ols);
+      this.olsSolver.updateDisplay(train, this.models.ols, test);
       this.canvas.draw(this.activeRegTab, this.points, this.models, this.showResiduals);
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
   initializeGD() {
     try {
-      this.models.gd = this.gradientDescent.initialize(this.points);
+      this.models.gd = this.gradientDescent.initialize(this.getTrainPoints());
       this.canvas.draw(this.activeRegTab, this.points, this.models, this.showResiduals);
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
   nextGDStep() {
-    this.models.gd = this.gradientDescent.executeStep(this.points, this.models.gd);
+    this.models.gd = this.gradientDescent.executeStep(this.getTrainPoints(), this.models.gd);
     this.canvas.draw(this.activeRegTab, this.points, this.models, this.showResiduals);
     this.canvas.drawLossPlot(this.gradientDescent.lossHistory);
   }
@@ -720,9 +1159,9 @@ class App {
     if (!this.gradientDescent.initialized) {
       this.initializeGD();
     }
-    
+
     this.gradientDescent.startAutoRun(
-      this.points,
+      this.getTrainPoints(),
       () => this.models.gd, // Function to get current model
       (newModel) => {       // Callback to update model
         this.models.gd = newModel;
@@ -748,10 +1187,10 @@ class App {
 
   calculateManual() {
     try {
-      this.models.manual = this.manualCalculator.calculate(this.points);
+      this.models.manual = this.manualCalculator.calculate(this.getTrainPoints());
       this.canvas.draw(this.activeRegTab, this.points, this.models, this.showResiduals);
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -838,16 +1277,16 @@ class App {
   // Logistic Regression Methods
   initializeLR() {
     try {
-      this.models.logistic = this.logisticRegression.initialize(this.points);
+      this.models.logistic = this.logisticRegression.initialize(this.getTrainPoints());
       this.canvas.draw(this.activeRegTab, this.points, this.models, this.showResiduals);
       this.updateLRMetrics();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
   nextLRStep() {
-    this.models.logistic = this.logisticRegression.executeStep(this.points, this.models.logistic);
+    this.models.logistic = this.logisticRegression.executeStep(this.getTrainPoints(), this.models.logistic);
     this.canvas.draw(this.activeRegTab, this.points, this.models, this.showResiduals);
     this.drawLRLossPlot();
     this.updateLRMetrics();
@@ -859,7 +1298,7 @@ class App {
     }
 
     this.logisticRegression.startAutoRun(
-      this.points,
+      this.getTrainPoints(),
       () => this.models.logistic,
       (newModel) => {
         this.models.logistic = newModel;
@@ -890,7 +1329,10 @@ class App {
   updateLRMetrics(threshold = 0.5) {
     if (!this.models.logistic.fitted || this.points.length === 0) return;
 
-    const metrics = this.logisticRegression.calculateMetrics(this.points, this.models.logistic, threshold);
+    // Metrics computed on training set; Youden threshold likewise computed on train only
+    // to avoid leakage. Test points are visually rendered as rings on the canvas.
+    const train = this.getTrainPoints();
+    const metrics = this.logisticRegression.calculateMetrics(train, this.models.logistic, threshold);
     if (!metrics) return;
 
     // Update threshold display
@@ -910,8 +1352,8 @@ class App {
     document.getElementById('lr-specificity').textContent = (metrics.specificity * 100).toFixed(2) + '%';
     document.getElementById('lr-f1').textContent = metrics.f1.toFixed(4);
 
-    // Calculate and display Youden index
-    const youdenThreshold = this.logisticRegression.calculateYoudenThreshold(this.points, this.models.logistic);
+    // Calculate and display Youden index (on train only — avoid leakage)
+    const youdenThreshold = this.logisticRegression.calculateYoudenThreshold(train, this.models.logistic);
     document.getElementById('lr-youden').textContent = youdenThreshold.toFixed(2);
   }
 
@@ -1027,7 +1469,7 @@ class App {
   calculateCorrelation() {
     try {
       if (this.statData.correlation.length < 2) {
-        alert('Need at least 2 points! Click on canvas to add or use Sample Data.');
+        window.showToast('Need at least 2 points. Click the canvas to add some, or use Sample Data.', 'warn');
         return;
       }
 
@@ -1069,7 +1511,7 @@ class App {
       document.getElementById('corr-results').style.display = 'block';
       this.canvas.drawStatisticsPlot('plot-correlation', { group1, group2 }, 'correlation');
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1077,7 +1519,7 @@ class App {
     try {
       const { group1, group2 } = this.statData.ttest;
       if (group1.length < 2 || group2.length < 2) {
-        alert('Each group needs at least 2 observations! Click canvas to add or use Sample Data.');
+        window.showToast('Each group needs at least 2 observations. Click canvas to add or use Sample Data.', 'warn');
         return;
       }
 
@@ -1152,7 +1594,7 @@ class App {
       document.getElementById('ttest-results').style.display = 'block';
       this.canvas.drawStatisticsPlot('plot-ttest', { group1, group2, mean1: result.mean1, mean2: result.mean2 }, 'ttest');
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1160,7 +1602,7 @@ class App {
     try {
       const groups = this.statData.anova.groups.filter(g => g.length > 0);
       if (groups.length < 2) {
-        alert('Need at least 2 groups with data! Click canvas and use keys 1-5 to select groups, or use Sample Data.');
+        window.showToast('Need at least 2 groups with data. Click canvas and press keys 1-5 to switch group, or use Sample Data.', 'warn');
         return;
       }
 
@@ -1208,7 +1650,7 @@ class App {
       document.getElementById('anova-results').style.display = 'block';
       this.canvas.drawStatisticsPlot('plot-anova', result, 'anova');
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1467,7 +1909,7 @@ class App {
     try {
       this.recommendationSystem.addUserRow();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1475,7 +1917,7 @@ class App {
     try {
       this.recommendationSystem.addMovieColumn();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1483,7 +1925,7 @@ class App {
     try {
       this.recommendationSystem.resetToDefault();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1491,7 +1933,7 @@ class App {
     try {
       this.recommendationSystem.generateRandomRatings();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1499,7 +1941,7 @@ class App {
     try {
       this.contentBasedFiltering.addFeature();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1507,7 +1949,7 @@ class App {
     try {
       this.contentBasedFiltering.resetFeatures();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1515,7 +1957,7 @@ class App {
     try {
       this.contentBasedFiltering.randomizeFeatures();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1523,7 +1965,7 @@ class App {
     try {
       this.contentBasedFiltering.computeRecommendations();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1531,7 +1973,7 @@ class App {
     try {
       this.collaborativeFiltering.initialize();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1539,7 +1981,7 @@ class App {
     try {
       this.collaborativeFiltering.trainEpoch();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1550,7 +1992,7 @@ class App {
       }
       this.collaborativeFiltering.autoRun();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1643,7 +2085,7 @@ class App {
       this.kMeansClustering.initialize();
       this.drawClusteringCanvas();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1652,7 +2094,7 @@ class App {
       this.kMeansClustering.trainIteration();
       this.drawClusteringCanvas();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1685,7 +2127,7 @@ class App {
             this.autoTimeoutId = setTimeout(runStep, 200);
           } catch (e) {
             this.stopAutoRun();
-            alert(e.message);
+            window.showToast(e.message, 'error');
           }
         };
 
@@ -1693,7 +2135,7 @@ class App {
       };
       this.kMeansClustering.autoRun();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 
@@ -1713,7 +2155,7 @@ class App {
       this.hierarchicalClustering.computeClustering();
       this.drawClusteringCanvas();
     } catch (e) {
-      alert(e.message);
+      window.showToast(e.message, 'error');
     }
   }
 

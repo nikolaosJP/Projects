@@ -1,26 +1,44 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Machine Learning & XAI Platform</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script>
+  // Apply theme before paint to avoid flash
+  (function() {
+    try {
+      const saved = localStorage.getItem('xai-theme');
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = saved || (prefersDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body>
-<!-- Your existing HTML content stays the same -->
 <div class="container">
-  <div class="header">
-    <h1>Machine Learning & XAI Platform</h1>
-    <div class="hint">Click to add • Drag to move • Right-click to delete</div>
-  </div>
+  <header class="header" role="banner">
+    <div>
+      <h1>Machine Learning &amp; XAI Platform</h1>
+      <span class="subtitle">Interactive algorithm visualization &mdash; click to add data, watch models train step-by-step.</span>
+      <div class="hint">Click to add &middot; Drag to move &middot; Right-click to delete &middot; Shift+click adds a held-out test point</div>
+    </div>
+    <div class="header-actions">
+      <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle theme">Theme</button>
+    </div>
+  </header>
 
-  <div class="tabs">
-    <div class="tab active" data-tab="linear">Linear Models</div>
-    <div class="tab" data-tab="nonlinear">Nonlinear Models</div>
-    <div class="tab" data-tab="stats">Statistics</div>
-    <div class="tab" data-tab="recsys">Recommendation Systems</div>
-    <div class="tab" data-tab="clustering">Clustering</div>
+  <div class="tabs" role="tablist" aria-label="Model categories">
+    <div class="tab active" data-tab="linear" role="tab" tabindex="0" aria-selected="true">Linear Models</div>
+    <div class="tab" data-tab="nonlinear" role="tab" tabindex="0" aria-selected="false">Nonlinear Models</div>
+    <div class="tab" data-tab="stats" role="tab" tabindex="0" aria-selected="false">Statistics</div>
+    <div class="tab" data-tab="recsys" role="tab" tabindex="0" aria-selected="false">Recommendation Systems</div>
+    <div class="tab" data-tab="clustering" role="tab" tabindex="0" aria-selected="false">Clustering</div>
+    <div class="tab" data-tab="llms" role="tab" tabindex="0" aria-selected="false">LLMs</div>
   </div>
 
   <div class="panel" id="general-controls-panel">
@@ -28,7 +46,20 @@
       <button id="clear">Clear</button>
       <button id="sample">Sample</button>
       <label><input id="residuals" type="checkbox" checked> Residuals</label>
-      <span><strong>Points: </strong><span id="point-count">0</span></span>
+      <label title="Hold out a random subset of points as a test set; train/test metrics are reported separately.">
+        <input id="split-enabled" type="checkbox"> Train/test split
+      </label>
+      <label class="split-inline" style="display:flex;align-items:center;gap:6px;">
+        Test fraction <input id="split-fraction" type="range" min="0.05" max="0.5" step="0.05" value="0.2" style="width:120px;">
+        <span id="split-fraction-label" class="split-frac">20%</span>
+        <button id="split-reshuffle" title="Reshuffle which points are in the test set">Reshuffle</button>
+      </label>
+      <span id="split-legend" class="split-legend" style="display:none;" aria-hidden="true">
+        <span class="legend-swatch swatch-train" title="Solid: training point"></span>train
+        &nbsp;
+        <span class="legend-swatch swatch-test" title="Hollow ring: held-out test point"></span>test
+      </span>
+      <span><strong>Points: </strong><span id="point-count" aria-live="polite">0</span></span>
     </div>
   </div>
 
@@ -46,7 +77,7 @@
       <div class="regtab-content active" id="regtab-ols">
     <div class="main-grid">
       <div class="panel">
-        <canvas id="plot-ols" width="800" height="500"></canvas>
+        <canvas id="plot-ols"></canvas>
       </div>
       <div>
         <div class="panel">
@@ -75,11 +106,11 @@
         <div class="gd-grid">
           <div>
             <div class="subtle">Data + Fit</div>
-            <canvas id="plot-gd" width="800" height="500"></canvas>
+            <canvas id="plot-gd"></canvas>
           </div>
           <div>
             <div class="subtle">Loss History</div>
-            <canvas id="loss-plot" width="380" height="500"></canvas>
+            <canvas id="loss-plot"></canvas>
           </div>
         </div>
       </div>
@@ -143,7 +174,7 @@
       <div class="regtab-content" id="regtab-manual">
     <div class="main-grid">
       <div class="panel">
-        <canvas id="plot-manual" width="800" height="500"></canvas>
+        <canvas id="plot-manual"></canvas>
       </div>
       <div>
         <div class="panel">
@@ -206,12 +237,12 @@
         <div class="gd-grid">
           <div>
             <div class="subtle">Classification Data + Decision Boundary</div>
-            <canvas id="plot-logistic" width="800" height="500"></canvas>
+            <canvas id="plot-logistic"></canvas>
             <div class="hint" style="margin-top: 10px;">Select a group button, then click to add points. Red = Group 0, Blue = Group 1.</div>
           </div>
           <div>
             <div class="subtle">Loss History</div>
-            <canvas id="lr-loss-plot" width="380" height="500"></canvas>
+            <canvas id="lr-loss-plot"></canvas>
           </div>
         </div>
       </div>
@@ -327,13 +358,15 @@
         <div class="tab" data-nltab="rf">Random Forest</div>
         <div class="tab" data-nltab="xgb">XGBoost</div>
         <div class="tab" data-nltab="nn">Neural Network</div>
+        <div class="tab" data-nltab="rnn">RNN</div>
+        <div class="tab" data-nltab="lstm">LSTM</div>
       </div>
 
       <!-- Decision Tree Subtab -->
       <div class="nltab-content active" id="nltab-dt">
         <div class="main-grid">
           <div class="panel">
-            <canvas id="plot-dt" width="800" height="500"></canvas>
+            <canvas id="plot-dt"></canvas>
             <div class="hint">Select task type • Select class for classification • Click to add points • Right-click to delete</div>
           </div>
           <div>
@@ -398,7 +431,7 @@
       <div class="nltab-content" id="nltab-rf">
         <div class="main-grid">
           <div class="panel">
-            <canvas id="plot-rf" width="800" height="500"></canvas>
+            <canvas id="plot-rf"></canvas>
             <div class="hint">Select task type • Select class for classification • Click to add points • Right-click to delete</div>
           </div>
           <div>
@@ -470,12 +503,12 @@
             <div class="gd-grid">
               <div>
                 <div class="subtle">Data + Predictions</div>
-                <canvas id="plot-xgb" width="800" height="500"></canvas>
+                <canvas id="plot-xgb"></canvas>
                 <div class="hint">Select task type • Select class for classification • Click to add points • Right-click to delete</div>
               </div>
               <div>
                 <div class="subtle">Loss History</div>
-                <canvas id="xgb-loss-plot" width="380" height="500"></canvas>
+                <canvas id="xgb-loss-plot"></canvas>
               </div>
             </div>
           </div>
@@ -556,12 +589,12 @@
             <div class="gd-grid">
               <div>
                 <div class="subtle">Data + Predictions</div>
-                <canvas id="plot-nn" width="800" height="500"></canvas>
+                <canvas id="plot-nn"></canvas>
                 <div class="hint">Select task type • Select class for classification • Click to add points • Right-click to delete</div>
               </div>
               <div>
                 <div class="subtle">Loss History</div>
-                <canvas id="nn-loss-plot" width="380" height="500"></canvas>
+                <canvas id="nn-loss-plot"></canvas>
               </div>
             </div>
           </div>
@@ -633,6 +666,155 @@
           </div>
         </div>
       </div>
+
+      <!-- RNN Subtab -->
+      <div class="nltab-content" id="nltab-rnn">
+        <div class="main-grid">
+          <div class="panel">
+            <div class="subtle">Data sorted by X (treated as time) + per-step predicted next value (open green circles)</div>
+            <canvas id="plot-rnn"></canvas>
+            <div class="hint">RNN treats your points as a 1-D time series. Click to add, drag to move, right-click to delete.</div>
+          </div>
+          <div>
+            <div class="panel">
+              <h3>Vanilla RNN (Elman)</h3>
+              <p style="font-size:13px;margin:6px 0;">At each step t the RNN consumes y_t and updates a hidden state h_t, then predicts y<sub>t+1</sub>. The same weights W_x, W_h, W_y are re-used at every time step.</p>
+              <div class="formula"><span class="formula-inline" data-formula="h_t = \tanh(W_x\, y_t + W_h\, h_{t-1} + b_h)"></span></div>
+              <div class="formula"><span class="formula-inline" data-formula="\hat{y}_{t+1} = W_y \cdot h_t + b_y"></span></div>
+
+              <div class="controls">
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Hidden H
+                  <input id="rnn-hidden" type="number" value="4" min="1" max="8" step="1" style="width:64px;">
+                </label>
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Seed
+                  <input id="rnn-seed" type="number" value="42" step="1" style="width:80px;">
+                </label>
+                <button id="init-rnn" class="warning">Initialize</button>
+                <button id="next-step-rnn" class="success" disabled>Next Step</button>
+                <button id="run-rnn" disabled>Run All</button>
+                <button id="reset-rnn">Reset</button>
+              </div>
+
+              <div class="controls" style="background:var(--success-soft);padding:8px;border-radius:4px;">
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">η
+                  <input id="rnn-lr" type="number" value="0.05" min="0.0001" max="1" step="0.01" style="width:80px;">
+                </label>
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Epochs
+                  <input id="rnn-epochs" type="number" value="200" min="1" max="2000" step="10" style="width:80px;">
+                </label>
+                <button id="train-rnn" class="primary" disabled>Train</button>
+                <span style="font-size:11px;color:var(--fg-muted);">Gradient descent on Σ(ŷ−y)²</span>
+              </div>
+
+              <div class="iteration-info">
+                <strong>Step: </strong><span id="rnn-step-count">0</span> /
+                <span id="rnn-step-total">0</span> &middot;
+                <strong>MSE: </strong><span id="rnn-mse">—</span>
+              </div>
+
+              <div id="rnn-loss-wrap" style="display:none;">
+                <div class="subtle">Training loss</div>
+                <canvas id="rnn-loss-plot" style="aspect-ratio: 5/2;max-width:100%;"></canvas>
+              </div>
+
+              <div style="display:none;">
+                <h4>Weights</h4>
+                <div id="rnn-weights"></div>
+              </div>
+
+              <div style="display:none;">
+                <h4>Current Step</h4>
+                <div id="rnn-step-detail"></div>
+              </div>
+
+              <div style="display:none;">
+                <h4>History</h4>
+                <div id="rnn-history"></div>
+              </div>
+
+              <div class="calculations" style="background:var(--accent-soft);padding:8px;border-radius:4px;margin-top:12px;">
+                <p style="margin:4px 0;font-size:12px;"><strong>Weights are seeded random — not trained.</strong> Change the seed to see different recurrence behaviour. Predictions reflect the random projections, not learned signal. Training would minimise &Sigma;<sub>t</sub>(ŷ<sub>t+1</sub> &minus; y<sub>t+1</sub>)<sup>2</sup> via BPTT.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LSTM Subtab -->
+      <div class="nltab-content" id="nltab-lstm">
+        <div class="main-grid">
+          <div class="panel">
+            <div class="subtle">Same data, now with cell state c<sub>t</sub> gating long-range memory</div>
+            <canvas id="plot-lstm"></canvas>
+            <div class="hint">LSTM also treats your points as a 1-D time series.</div>
+          </div>
+          <div>
+            <div class="panel">
+              <h3>LSTM Cell</h3>
+              <p style="font-size:13px;margin:6px 0;">Concatenate z<sub>t</sub> = [h<sub>t-1</sub>, y<sub>t</sub>]. Four gates control how the cell state is updated and read out:</p>
+              <div class="formula"><span class="formula-inline" data-formula="f_t = \sigma(W_f z_t + b_f),\; i_t = \sigma(W_i z_t + b_i),\; o_t = \sigma(W_o z_t + b_o)"></span></div>
+              <div class="formula"><span class="formula-inline" data-formula="g_t = \tanh(W_g z_t + b_g)"></span></div>
+              <div class="formula"><span class="formula-inline" data-formula="c_t = f_t \odot c_{t-1} + i_t \odot g_t,\quad h_t = o_t \odot \tanh(c_t)"></span></div>
+              <div class="formula"><span class="formula-inline" data-formula="\hat{y}_{t+1} = W_y \cdot h_t + b_y"></span></div>
+
+              <div class="controls">
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Hidden H
+                  <input id="lstm-hidden" type="number" value="4" min="1" max="8" step="1" style="width:64px;">
+                </label>
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Seed
+                  <input id="lstm-seed" type="number" value="42" step="1" style="width:80px;">
+                </label>
+                <button id="init-lstm" class="warning">Initialize</button>
+                <button id="next-step-lstm" class="success" disabled>Next Step</button>
+                <button id="run-lstm" disabled>Run All</button>
+                <button id="reset-lstm">Reset</button>
+              </div>
+
+              <div class="controls" style="background:var(--success-soft);padding:8px;border-radius:4px;">
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">η
+                  <input id="lstm-lr" type="number" value="0.05" min="0.0001" max="1" step="0.01" style="width:80px;">
+                </label>
+                <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Epochs
+                  <input id="lstm-epochs" type="number" value="150" min="1" max="1000" step="10" style="width:80px;">
+                </label>
+                <button id="train-lstm" class="primary" disabled>Train</button>
+                <span style="font-size:11px;color:var(--fg-muted);">Slower than RNN (more params)</span>
+              </div>
+
+              <div class="iteration-info">
+                <strong>Step: </strong><span id="lstm-step-count">0</span> /
+                <span id="lstm-step-total">0</span> &middot;
+                <strong>MSE: </strong><span id="lstm-mse">—</span>
+              </div>
+
+              <div id="lstm-loss-wrap" style="display:none;">
+                <div class="subtle">Training loss</div>
+                <canvas id="lstm-loss-plot" style="aspect-ratio: 5/2;max-width:100%;"></canvas>
+              </div>
+
+              <div style="display:none;">
+                <h4>Weights</h4>
+                <div id="lstm-weights"></div>
+              </div>
+
+              <div style="display:none;">
+                <h4>Current Step</h4>
+                <div id="lstm-step-detail"></div>
+              </div>
+
+              <div style="display:none;">
+                <h4>History</h4>
+                <div id="lstm-history"></div>
+              </div>
+
+              <div class="calculations" style="background:var(--accent-soft);padding:8px;border-radius:4px;margin-top:12px;">
+                <p style="margin:4px 0;font-size:12px;"><strong>Why LSTM over vanilla RNN?</strong> The gated cell-state c<sub>t</sub> lets gradients flow unchanged through time when the forget gate stays open, fixing the vanishing-gradient problem that limits how far back a vanilla RNN can &ldquo;remember&rdquo;.</p>
+                <p style="margin:4px 0;font-size:12px;"><strong>Forget-gate bias initialised to +1</strong> &mdash; a standard trick that biases the cell toward retaining information early in training.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -650,7 +832,7 @@
       <div class="subtab-content active" id="subtab-correlation">
         <div class="main-grid">
           <div class="panel">
-            <canvas id="plot-correlation" width="800" height="500"></canvas>
+            <canvas id="plot-correlation"></canvas>
             <div class="hint">Click to add paired observations (x, y) • Right-click to delete last point</div>
             <div class="controls">
               <button id="calc-correlation" class="primary">Calculate</button>
@@ -695,7 +877,7 @@
       <div class="subtab-content" id="subtab-ttest">
         <div class="main-grid">
           <div class="panel">
-            <canvas id="plot-ttest" width="800" height="500"></canvas>
+            <canvas id="plot-ttest"></canvas>
             <div class="hint">Click left (red) or right (blue) region to add points • Right-click to delete last</div>
             <div class="controls">
               <span><strong>Active Group: </strong></span>
@@ -755,7 +937,7 @@
                 </div>
                 <div class="panel" style="margin-top:12px;">
                   <h4>t-Distribution</h4>
-                  <canvas id="ttest-dist-plot" width="400" height="300"></canvas>
+                  <canvas id="ttest-dist-plot"></canvas>
                   <p style="font-size:11px;color:#64748b;margin-top:8px;">Gray curve: t-distribution. Red line: your t-statistic. Shaded area: p-value (changes based on test type)</p>
                 </div>
               </div>
@@ -768,7 +950,7 @@
       <div class="subtab-content" id="subtab-anova">
         <div class="main-grid">
           <div class="panel">
-            <canvas id="plot-anova" width="800" height="500"></canvas>
+            <canvas id="plot-anova"></canvas>
             <div class="hint">Click a colored region to add points to that group • Right-click to delete last from active group • Use keys 1-5 to select groups</div>
             <div class="controls">
               <span><strong>Active Group: </strong></span>
@@ -825,7 +1007,7 @@
                 </div>
                 <div class="panel" style="margin-top:12px;">
                   <h4>F-Distribution</h4>
-                  <canvas id="anova-dist-plot" width="400" height="300"></canvas>
+                  <canvas id="anova-dist-plot"></canvas>
                   <p style="font-size:11px;color:#64748b;margin-top:8px;">Gray curve: F-distribution. Red line: your F-statistic. Shaded area: p-value (right tail)</p>
                 </div>
               </div>
@@ -1062,11 +1244,11 @@
           <div class="gd-grid">
             <div>
               <div class="subtle">Loss History</div>
-              <canvas id="cf-loss-plot" width="400" height="300"></canvas>
+              <canvas id="cf-loss-plot"></canvas>
             </div>
             <div>
               <div class="subtle">Predicted Ratings Heatmap</div>
-              <canvas id="cf-heatmap" width="380" height="300"></canvas>
+              <canvas id="cf-heatmap"></canvas>
             </div>
           </div>
         </div>
@@ -1109,7 +1291,7 @@
       <!-- Main grid: Canvas on left, K-Means controls on right -->
       <div class="main-grid">
         <div class="panel">
-          <canvas id="plot-clustering" width="800" height="500"></canvas>
+          <canvas id="plot-clustering"></canvas>
           <div class="hint">Click to add points • Right-click to delete last point</div>
           <div class="controls">
             <button id="clustering-clear">Clear</button>
@@ -1242,7 +1424,7 @@
 
           <h4>Dendrogram</h4>
           <div class="panel" style="background:#f8fafc;padding:12px;">
-            <canvas id="hierarchical-dendrogram" width="600" height="300"></canvas>
+            <canvas id="hierarchical-dendrogram"></canvas>
           </div>
 
           <h4>Metrics</h4>
@@ -1254,15 +1436,212 @@
       </div>
     </div>
   </div>
+
+  <!-- LLMs Tab -->
+  <div class="tab-content" id="tab-llms">
+    <div class="panel">
+      <h3>Large Language Models</h3>
+      <p>Educational walkthroughs of two foundational LLM pipelines. Every matrix and similarity score is computed in front of you, with the underlying formulas shown via KaTeX.</p>
+      <div class="tabs" style="margin-bottom: 16px;" role="tablist" aria-label="LLM sub-tabs">
+        <div class="tab active" data-llmtab="transformer" role="tab" tabindex="0" aria-selected="true">Transformer</div>
+        <div class="tab" data-llmtab="rag" role="tab" tabindex="0" aria-selected="false">RAG</div>
+      </div>
+
+      <!-- Transformer Sub-tab -->
+      <div class="llmtab-content active" id="llmtab-transformer">
+        <div class="panel">
+          <h4>Single-Layer, Single-Head Self-Attention</h4>
+          <p>A miniature transformer encoder block. Type a short sentence, then step through tokenization, embedding, positional encoding, and the scaled-dot-product attention head.</p>
+
+          <label>Sentence
+            <textarea id="tr-sentence" rows="2" style="font-family:inherit;font-size:14px;">the cat sat on the mat</textarea>
+          </label>
+
+          <div class="controls" style="align-items:center;">
+            <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">d<sub>model</sub>
+              <input id="tr-dim" type="number" value="4" min="2" max="8" step="1" style="width:64px;">
+            </label>
+            <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Seed
+              <input id="tr-seed" type="number" value="42" step="1" style="width:80px;">
+            </label>
+            <button id="tr-init" class="warning">Initialize</button>
+            <button id="tr-next" class="success" disabled>Next Step</button>
+            <button id="tr-run" disabled>Run All</button>
+            <button id="tr-reset">Reset</button>
+            <span style="font-size:12px;color:var(--fg-muted);"><strong>Current:</strong> <span id="tr-step-name">Not Started</span></span>
+          </div>
+
+          <div class="step-info" id="tr-step-tokenize" style="display:none;">
+            <div class="step-title">Step 1 &mdash; Tokenize</div>
+            <p>Split the sentence into word-level tokens, then map each token to an integer ID using a small built vocabulary <em>V</em>.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{tokens} = \text{split}(s),\quad x_t = V[\text{token}_t]"></span></div>
+            <div id="tr-out-tokenize"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-embed" style="display:none;">
+            <div class="step-title">Step 2 &mdash; Token Embedding</div>
+            <p>Look up each token ID in the embedding matrix <em>E &isin; &reals;<sup>|V| &times; d</sup></em>. This turns each integer into a continuous vector of dimension <em>d<sub>model</sub></em>.</p>
+            <div class="formula"><span class="formula-inline" data-formula="X = [E[x_1]; E[x_2]; \ldots; E[x_T]]"></span></div>
+            <div id="tr-out-embed"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-pos" style="display:none;">
+            <div class="step-title">Step 3 &mdash; Add Sinusoidal Positional Encoding</div>
+            <p>Without positions, attention is permutation-invariant. Inject order with a fixed sinusoid:</p>
+            <div class="formula"><span class="formula-inline" data-formula="PE_{(t,2i)}=\sin\!\left(t/10000^{2i/d}\right),\quad PE_{(t,2i+1)}=\cos\!\left(t/10000^{2i/d}\right)"></span></div>
+            <div class="formula"><span class="formula-inline" data-formula="X' = X + PE"></span></div>
+            <div id="tr-out-pos"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-qkv" style="display:none;">
+            <div class="step-title">Step 4 &mdash; Project to Queries, Keys, Values</div>
+            <p>Three learned linear projections of the input. Each token vector becomes three new vectors of dimension <em>d</em>.</p>
+            <div class="formula"><span class="formula-inline" data-formula="Q = X'W_Q,\quad K = X'W_K,\quad V = X'W_V"></span></div>
+            <div id="tr-out-qkv"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-scores" style="display:none;">
+            <div class="step-title">Step 5 &mdash; Scaled Dot-Product Scores</div>
+            <p>Score every (query, key) pair. The 1/&radic;d scaling keeps gradients well-conditioned for larger dimensions.</p>
+            <div class="formula"><span class="formula-inline" data-formula="S = \frac{QK^{\top}}{\sqrt{d}}"></span></div>
+            <div id="tr-out-scores"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-softmax" style="display:none;">
+            <div class="step-title">Step 6 &mdash; Row-wise Softmax</div>
+            <p>Turn each row of scores into a probability distribution over keys.</p>
+            <div class="formula"><span class="formula-inline" data-formula="A_{ij} = \frac{\exp(S_{ij})}{\sum_k \exp(S_{ik})}"></span></div>
+            <div id="tr-out-softmax"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-output" style="display:none;">
+            <div class="step-title">Step 7 &mdash; Attention Output</div>
+            <p>Each token&#39;s output is a weighted average of value vectors, weighted by how much it attended to each key.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d}}\right)V"></span></div>
+            <div id="tr-out-output"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-addnorm1" style="display:none;">
+            <div class="step-title">Step 8 &mdash; Add &amp; Norm (1)</div>
+            <p>Residual connection lets gradients flow around the attention layer. LayerNorm then standardises each row to zero mean / unit variance, which keeps deeper stacks from drifting.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{LN}_1 = \text{LayerNorm}(X' + \text{Attention}(X'))"></span></div>
+            <div class="formula"><span class="formula-inline" data-formula="\text{LayerNorm}(x) = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^{2} + \epsilon}} + \beta"></span></div>
+            <div id="tr-out-addnorm1"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-ffn" style="display:none;">
+            <div class="step-title">Step 9 &mdash; Position-wise Feed-Forward</div>
+            <p>The same 2-layer MLP is applied to every token independently. The non-linearity (ReLU) is what gives the transformer its expressive power beyond linear attention.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{FFN}(x) = \max(0,\, x W_1 + b_1)\, W_2 + b_2"></span></div>
+            <div id="tr-out-ffn"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-addnorm2" style="display:none;">
+            <div class="step-title">Step 10 &mdash; Add &amp; Norm (2)</div>
+            <p>Same pattern again: residual around the FFN, then LayerNorm. The result is the block output that would feed into the next transformer block in a deeper model.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{LN}_2 = \text{LayerNorm}(\text{LN}_1 + \text{FFN}(\text{LN}_1))"></span></div>
+            <div id="tr-out-addnorm2"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-logits" style="display:none;">
+            <div class="step-title">Step 11 &mdash; Output Projection</div>
+            <p>Project every token&#39;s final hidden vector onto the vocabulary. Each column of W<sub>out</sub> defines the &ldquo;direction&rdquo; for one word.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{logits} = \text{LN}_2 \cdot W_{\text{out}} \in \mathbb{R}^{T \times |V|}"></span></div>
+            <div id="tr-out-logits"></div>
+          </div>
+
+          <div class="step-info" id="tr-step-predict" style="display:none;">
+            <div class="step-title">Step 12 &mdash; Predict Next Word</div>
+            <p>A decoder-style head: take the last token&#39;s logits, softmax over the vocabulary, and the argmax is the predicted next word.</p>
+            <div class="formula"><span class="formula-inline" data-formula="P(\text{next} = w \mid x_{1..T}) = \text{softmax}(\text{logits}_T)_w"></span></div>
+            <div id="tr-out-predict"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RAG Sub-tab -->
+      <div class="llmtab-content" id="llmtab-rag">
+        <div class="panel">
+          <h4>Retrieval-Augmented Generation</h4>
+          <p>A minimal RAG pipeline using TF&ndash;IDF retrieval. Edit the corpus, enter a query, and watch the system tokenize, build vectors, compute similarities, and assemble a prompt with retrieved context.</p>
+
+          <label>Corpus (one document per line)
+            <textarea id="rag-corpus" rows="6" style="font-family:inherit;font-size:14px;">Transformers use self-attention to model relationships between tokens in a sequence.
+Retrieval-augmented generation combines a retriever with a language model to ground answers in a corpus.
+TF-IDF weights rare terms higher and is a strong baseline for sparse retrieval.
+Cosine similarity measures the angle between two vectors and ignores their magnitudes.
+Embeddings map discrete tokens into continuous vector spaces where similarity is meaningful.</textarea>
+          </label>
+
+          <label>Query <input id="rag-query" type="text" value="how does attention compare tokens?" style="width:100%;"></label>
+
+          <div class="controls">
+            <label style="margin:0;display:inline-flex;align-items:center;gap:6px;font-weight:500;">Top-k
+              <input id="rag-topk" type="number" value="3" min="1" max="10" step="1" style="width:64px;">
+            </label>
+            <button id="rag-run" class="primary">Run Pipeline</button>
+            <button id="rag-reset">Reset</button>
+          </div>
+
+          <div class="step-info" id="rag-step-tokens" style="display:none;">
+            <div class="step-title">Step 1 &mdash; Tokenize Corpus + Query</div>
+            <p>Lowercase, strip punctuation, split on whitespace. Each document becomes a bag of tokens.</p>
+            <div id="rag-out-tokens"></div>
+          </div>
+
+          <div class="step-info" id="rag-step-idf" style="display:none;">
+            <div class="step-title">Step 2 &mdash; Build Vocabulary and IDF</div>
+            <p>Inverse document frequency penalises terms that appear in many documents. Rare-but-recurring terms get the highest weight.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{IDF}(t) = \log\!\left(\frac{N}{1 + \text{df}(t)}\right) + 1"></span></div>
+            <div id="rag-out-idf"></div>
+          </div>
+
+          <div class="step-info" id="rag-step-tfidf" style="display:none;">
+            <div class="step-title">Step 3 &mdash; TF&ndash;IDF Matrix</div>
+            <p>For every document, weight its term frequency by the IDF of each term.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{TF-IDF}(t, d) = \text{tf}(t, d) \cdot \text{IDF}(t)"></span></div>
+            <div id="rag-out-tfidf"></div>
+          </div>
+
+          <div class="step-info" id="rag-step-query" style="display:none;">
+            <div class="step-title">Step 4 &mdash; Query Vector</div>
+            <p>Encode the query in the same TF&ndash;IDF space so we can compare apples to apples.</p>
+            <div id="rag-out-query"></div>
+          </div>
+
+          <div class="step-info" id="rag-step-sim" style="display:none;">
+            <div class="step-title">Step 5 &mdash; Cosine Similarity</div>
+            <p>Compare query to each document by the angle between their TF&ndash;IDF vectors.</p>
+            <div class="formula"><span class="formula-inline" data-formula="\text{cos}(q, d) = \frac{q \cdot d}{\lVert q \rVert\, \lVert d \rVert}"></span></div>
+            <div id="rag-out-sim"></div>
+          </div>
+
+          <div class="step-info" id="rag-step-topk" style="display:none;">
+            <div class="step-title">Step 6 &mdash; Top-k Retrieval</div>
+            <p>Keep the <em>k</em> most-similar documents to feed to the generator.</p>
+            <div id="rag-out-topk"></div>
+          </div>
+
+          <div class="step-info" id="rag-step-prompt" style="display:none;">
+            <div class="step-title">Step 7 &mdash; Augmented Prompt</div>
+            <p>Concatenate retrieved context and the query into the prompt that would be passed to a generator.</p>
+            <div id="rag-out-prompt"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Load modules in order: utilities first, then solvers, then main app -->
 <script src="{{ url_for('static', filename='utils.js') }}"></script>
 <script src="{{ url_for('static', filename='solvers/linear-models.js') }}"></script>
 <script src="{{ url_for('static', filename='solvers/nonlinear-models.js') }}"></script>
+<script src="{{ url_for('static', filename='solvers/sequence-models.js') }}"></script>
 <script src="{{ url_for('static', filename='solvers/statistics.js') }}"></script>
 <script src="{{ url_for('static', filename='solvers/recsys.js') }}"></script>
 <script src="{{ url_for('static', filename='solvers/clustering.js') }}"></script>
+<script src="{{ url_for('static', filename='solvers/llms.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

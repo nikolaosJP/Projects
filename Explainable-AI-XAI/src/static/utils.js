@@ -2,6 +2,30 @@
 // UTILITIES
 // ============================================================================
 
+const DEBUG = false;
+function dlog(...args) { if (DEBUG) console.log(...args); }
+function dwarn(...args) { if (DEBUG) console.warn(...args); }
+function derror(...args) { if (DEBUG) console.error(...args); }
+
+// Toast notifications (replaces silent throws / alerts)
+function showToast(message, level = 'info', duration = 3500) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${level}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('toast-show'));
+  setTimeout(() => {
+    toast.classList.remove('toast-show');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 // KaTeX rendering utilities
 const katexQueue = [];
 
@@ -73,8 +97,9 @@ function pxToData(px, py, canvas) {
 // Export for global access
 window.AppUtils = {
   kRender, kFlush, kRenderInlineFormulas, calculateMSE, calculateR2,
-  dataToPx, pxToData, domain, margin
+  dataToPx, pxToData, domain, margin, showToast
 };
+window.showToast = showToast;
 
 // ============================================================================
 // CANVAS HANDLER
@@ -91,6 +116,8 @@ class CanvasHandler {
       rf: document.getElementById('plot-rf'),
       xgb: document.getElementById('plot-xgb'),
       nn: document.getElementById('plot-nn'),
+      rnn: document.getElementById('plot-rnn'),
+      lstm: document.getElementById('plot-lstm'),
       clustering: document.getElementById('plot-clustering')
     };
     this.contexts = {};
@@ -105,6 +132,54 @@ class CanvasHandler {
     }
     this.dragging = -1;
     this.setupEvents();
+    this.setupResponsiveCanvases();
+  }
+
+  // Set backing-store size on every visible canvas so it tracks CSS layout size,
+  // then redraw on resize (debounced via rAF).
+  setupResponsiveCanvases() {
+    const allCanvases = Array.from(document.querySelectorAll('canvas'));
+    const dpr = window.devicePixelRatio || 1;
+
+    const sizeOne = (canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.max(50, Math.round(rect.width));
+      const h = Math.max(50, Math.round(rect.height));
+      // Set the backing store; we don't scale the context — drawing code uses
+      // canvas.width / canvas.height directly so the existing math stays valid.
+      // DPR is intentionally ignored to keep the existing margin/font sizes consistent.
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        return true;
+      }
+      return false;
+    };
+
+    // Initial size pass
+    allCanvases.forEach(sizeOne);
+
+    if (typeof ResizeObserver === 'undefined') return;
+
+    let pending = null;
+    const requestRedraw = () => {
+      if (pending) return;
+      pending = requestAnimationFrame(() => {
+        pending = null;
+        if (window.App && typeof window.App.redraw === 'function') {
+          window.App.redraw();
+        }
+      });
+    };
+
+    const ro = new ResizeObserver(entries => {
+      let changed = false;
+      for (const entry of entries) {
+        if (sizeOne(entry.target)) changed = true;
+      }
+      if (changed) requestRedraw();
+    });
+    allCanvases.forEach(c => ro.observe(c));
   }
 
   draw(activeTab, points, models, showResiduals) {
@@ -215,16 +290,30 @@ class CanvasHandler {
   }
 
   drawPoints(ctx, canvas, points) {
-    ctx.fillStyle = '#1f2937';
+    let anyTest = false;
     for (const p of points) {
       const [px, py] = AppUtils.dataToPx(p.x, p.y, canvas);
-      ctx.beginPath();
-      ctx.arc(px, py, 6, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      if (p.isTest) {
+        anyTest = true;
+        // Test points: hollow ring with thicker stroke
+        ctx.beginPath();
+        ctx.arc(px, py, 7, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fill();
+        ctx.strokeStyle = '#ea580c';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#1f2937';
+        ctx.beginPath();
+        ctx.arc(px, py, 6, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
+    if (anyTest) this._drawSplitLegend(ctx, canvas, 'regression');
   }
 
   drawLogisticCanvas(ctx, canvas, points, model, showResiduals) {
@@ -273,17 +362,31 @@ class CanvasHandler {
   }
 
   drawClassificationPoints(ctx, canvas, points) {
+    let anyTest = false;
     for (const p of points) {
       const [px, py] = AppUtils.dataToPx(p.x, p.y, canvas);
-      // Color by class: red for 0, blue for 1
-      ctx.fillStyle = p.label === 1 ? '#3b82f6' : '#ef4444';
-      ctx.beginPath();
-      ctx.arc(px, py, 6, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      const classColor = p.label === 1 ? '#3b82f6' : '#ef4444';
+      if (p.isTest) {
+        anyTest = true;
+        // Hollow ring in the class color
+        ctx.beginPath();
+        ctx.arc(px, py, 7, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fill();
+        ctx.strokeStyle = classColor;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = classColor;
+        ctx.beginPath();
+        ctx.arc(px, py, 6, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
+    if (anyTest) this._drawSplitLegend(ctx, canvas, 'classification');
   }
 
   // Nonlinear Models Drawing
@@ -301,8 +404,19 @@ class CanvasHandler {
     // Axes
     this.drawAxes(ctx, canvas);
 
+    // Sequence models (RNN / LSTM) have their own prediction layout: open-circle
+    // markers at each (x_{t+1}, ŷ_{t+1}) connected by a line.
+    if (model === 'rnn' || model === 'lstm') {
+      const m = models[model];
+      if (m && m.fitted && Array.isArray(m.predictions) && m.predictions.length > 0) {
+        this.drawSequencePredictions(ctx, canvas, points, m.predictions);
+      }
+      this.drawPoints(ctx, canvas, points);
+      return;
+    }
+
     // Draw model predictions/boundaries
-    if (models[model].fitted) {
+    if (models[model] && models[model].fitted) {
       if (taskType === 'classification') {
         this.drawNLDecisionBoundary(ctx, canvas, models[model], model);
       } else {
@@ -318,6 +432,89 @@ class CanvasHandler {
     }
   }
 
+  // Draw a small in-canvas legend showing train vs test point styles in the
+  // upper-right corner. Called only when at least one test point exists.
+  _drawSplitLegend(ctx, canvas, mode) {
+    const padX = 8, padY = 6, rowH = 16, dotR = 5;
+    const lines = [
+      { kind: 'train', label: 'train' },
+      { kind: 'test', label: 'test (held out)' },
+    ];
+    ctx.save();
+    ctx.font = '11px system-ui, sans-serif';
+    const w = Math.max(...lines.map(l => ctx.measureText(l.label).width)) + 28 + padX * 2;
+    const h = rowH * lines.length + padY * 2;
+    const x = canvas.width - AppUtils.margin - w - 4;
+    const y = AppUtils.margin + 4;
+
+    // Background
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.fill();
+    ctx.stroke();
+
+    for (let i = 0; i < lines.length; i++) {
+      const cy = y + padY + rowH * i + rowH / 2;
+      const cx = x + padX + dotR;
+      const line = lines[i];
+      ctx.beginPath();
+      ctx.arc(cx, cy, dotR, 0, 2 * Math.PI);
+      if (line.kind === 'train') {
+        ctx.fillStyle = (mode === 'classification') ? '#1f2937' : '#1f2937';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fill();
+        ctx.strokeStyle = '#ea580c';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#0f172a';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(line.label, cx + dotR + 6, cy);
+    }
+    ctx.restore();
+  }
+
+  drawSequencePredictions(ctx, canvas, points, predictions) {
+    if (!predictions || predictions.length === 0) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(AppUtils.margin, AppUtils.margin,
+             canvas.width - 2 * AppUtils.margin,
+             canvas.height - 2 * AppUtils.margin);
+    ctx.clip();
+
+    // Connecting line (predicted trajectory)
+    ctx.strokeStyle = '#16a34a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < predictions.length; i++) {
+      const [px, py] = AppUtils.dataToPx(predictions[i].x, predictions[i].y, canvas);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    // Open-circle markers at each predicted point
+    for (const p of predictions) {
+      const [px, py] = AppUtils.dataToPx(p.x, p.y, canvas);
+      ctx.beginPath();
+      ctx.arc(px, py, 5, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fill();
+      ctx.strokeStyle = '#16a34a';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   drawNLDecisionBoundary(ctx, canvas, model, modelType) {
     ctx.save();
     ctx.beginPath();
@@ -328,7 +525,7 @@ class CanvasHandler {
 
     // Sample many x points and determine class
     const steps = 200;
-    const dx = (AppUtils.domain.xmax - AppUtils.xmin) / steps;
+    const dx = (AppUtils.domain.xmax - AppUtils.domain.xmin) / steps;
 
     // Get the predictor based on model type
     let predictor;
@@ -766,18 +963,39 @@ class CanvasHandler {
   }
 
   setupEvents() {
-    console.log('Setting up canvas events...', this.canvases);
+    dlog('Setting up canvas events...', this.canvases);
     Object.values(this.canvases).forEach(canvas => {
       if (!canvas) {
-        console.warn('Canvas element not found!');
+        dwarn('Canvas element not found!');
         return;
       }
-      console.log('Attaching events to canvas:', canvas.id);
+      dlog('Attaching events to canvas:', canvas.id);
       canvas.addEventListener('contextmenu', e => e.preventDefault());
       canvas.addEventListener('mousedown', e => this.onMouseDown(e, canvas));
       canvas.addEventListener('mousemove', e => this.onMouseMove(e, canvas));
       canvas.addEventListener('mouseup', () => this.dragging = -1);
       canvas.addEventListener('mouseleave', () => this.dragging = -1);
+
+      // Touch support: emulate a left-click drag.
+      const touchEvt = (touch, button = 0) => ({
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        button,
+        shiftKey: false,
+        preventDefault() {},
+      });
+      canvas.addEventListener('touchstart', e => {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        this.onMouseDown(touchEvt(e.touches[0]), canvas);
+      }, { passive: false });
+      canvas.addEventListener('touchmove', e => {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        this.onMouseMove(touchEvt(e.touches[0]), canvas);
+      }, { passive: false });
+      canvas.addEventListener('touchend', () => { this.dragging = -1; });
+      canvas.addEventListener('touchcancel', () => { this.dragging = -1; });
     });
 
     // Statistics canvas event handlers
@@ -922,15 +1140,15 @@ class CanvasHandler {
   }
 
   onMouseDown(e, canvas) {
-    console.log('Mouse down event triggered!', canvas.id, e.button);
+    dlog('Mouse down event triggered!', canvas.id, e.button);
     if (!window.App) {
-      console.error('window.App is not defined!');
+      derror('window.App is not defined!');
       return;
     }
 
     const [px, py] = this.getMousePos(e, canvas);
     const idx = this.findNearestPoint(px, py, canvas);
-    console.log('Click position:', px, py, 'Nearest point index:', idx);
+    dlog('Click position:', px, py, 'Nearest point index:', idx);
 
     if (e.button === 2 && idx >= 0) {
       window.App.removePoint(idx);
@@ -940,7 +1158,7 @@ class CanvasHandler {
       this.dragging = idx;
     } else {
       const [x, y] = AppUtils.pxToData(px, py, canvas);
-      console.log('Adding new point at:', x, y);
+      dlog('Adding new point at:', x, y);
       // For classification (logistic regression or nonlinear models), assign class based on selected group
       const isLogistic = window.App && window.App.activeRegTab === 'logistic';
       const isNLClassification = window.App && window.App.activeTab === 'nonlinear' &&
@@ -948,7 +1166,10 @@ class CanvasHandler {
       const isClassification = isLogistic || isNLClassification;
 
       const label = isClassification ? (isLogistic ? window.App.getActiveLogisticGroup() : window.App.activeNLClass) : undefined;
-      window.App.addPoint(isClassification ? {x, y, label} : {x, y});
+      const userTest = !!(e.shiftKey && window.App.split && window.App.split.enabled);
+      const point = isClassification ? {x, y, label} : {x, y};
+      if (userTest) point.userTest = true;
+      window.App.addPoint(point);
     }
   }
 

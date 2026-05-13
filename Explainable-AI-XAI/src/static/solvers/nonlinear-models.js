@@ -1026,13 +1026,22 @@ class NeuralNetwork {
   }
 
   initialize(points, taskType, hiddenLayerSizes, activationName) {
-    if (points.length < 2) throw new Error('Add at least 2 points first!');
+    if (points.length < 2) {
+      window.showToast('Add at least 2 points to the canvas first.', 'warn');
+      return false;
+    }
 
     // hiddenLayerSizes is already an array of integers from app.js
-    const hiddenSizes = Array.isArray(hiddenLayerSizes) ? hiddenLayerSizes :
-                        hiddenLayerSizes.split(',').map(s => parseInt(s.trim())).filter(n => n > 0);
+    let hiddenSizes = Array.isArray(hiddenLayerSizes) ? hiddenLayerSizes :
+                      hiddenLayerSizes.split(',').map(s => parseInt(s.trim())).filter(n => n > 0);
 
-    if (hiddenSizes.length === 0) throw new Error('Invalid hidden layer sizes!');
+    // Clamp each layer size to a sane upper bound to prevent browser hangs
+    hiddenSizes = hiddenSizes.map(n => Math.max(1, Math.min(128, n)));
+
+    if (hiddenSizes.length === 0) {
+      window.showToast('Hidden layer sizes must be a comma-separated list of positive integers (e.g. "8,4").', 'warn');
+      return false;
+    }
 
     // Build architecture: input(1) -> hidden layers -> output(1)
     const architecture = [1, ...hiddenSizes, 1];
