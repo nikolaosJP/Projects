@@ -40,9 +40,13 @@ Open `jupyter/portfolio_analysis.ipynb` and run all cells to generate portfolio 
 
 ## Key Metrics
 
-- **ROIC**: `(Unrealized + Realized + Dividends) / Invested Capital × 100`
-- **TWR**: `(Current Equity / Total Contributed) - 1`
+- **Simple Return**: `(Current Equity / Total Contributed) - 1`
+- **TWR (time-weighted)**: `Π(1 + r_t) - 1`, with daily `r_t = (E_t - Flow_t) / E_{t-1} - 1`, so deposit timing doesn't affect it
 - **Annualized TWR**: `[(1 + TWR)^(1/years) - 1] × 100`
+- **XIRR (money-weighted)**: annual rate that discounts all contributions to the current value; reported in USD and JPY
+- **Holding Ret%**: `(Unrealized + Net Dividends) / Cost Basis × 100`, current holdings only
+
+Prices come from Yahoo Finance daily closes that are split-adjusted but not dividend-adjusted (`auto_adjust=False`); dividends are booked as cash. Statement timestamps are converted from `Asia/Tokyo` to New York trade dates (`STATEMENT_TZ` in `src/data_loader.py`).
 
 ## Disclaimer
 

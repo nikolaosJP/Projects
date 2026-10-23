@@ -7,6 +7,11 @@ import matplotlib.dates as mdates
 import numpy as np
 import polars as pl
 
+try:
+    from .metrics import money_weighted_return
+except ImportError:  # imported as a top-level module (notebooks add src/ to sys.path)
+    from metrics import money_weighted_return
+
 
 def plot_portfolio_performance(portfolio_history, transactions):
     """
@@ -24,12 +29,12 @@ def plot_portfolio_performance(portfolio_history, transactions):
                    if col.endswith('_value') and col != 'holdings_value']
 
     data = {k: portfolio_history[k].to_list() for k in
-            ['equity', 'contributed', 'invested_capital', 'cash', 'return_pct', 'portfolio_pnl', 'dividends']}
+            ['equity', 'contributed', 'invested_capital', 'cash', 'twr_pct', 'portfolio_pnl', 'dividends']}
 
     # Create figure
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 12), sharex=True,
                                          gridspec_kw={"height_ratios": [2, 1, 1.5]})
-    fig.suptitle("Portfolio Performance (Real-Time Market Data)", fontsize=14, fontweight='bold')
+    fig.suptitle("Portfolio Performance (Daily Close Prices)", fontsize=14, fontweight='bold')
 
     # Subplot 1: Portfolio value
     ax1.step(dates, data['equity'], 'b-', label='Total Value', linewidth=2, where='post')
@@ -53,10 +58,10 @@ def plot_portfolio_performance(portfolio_history, transactions):
     ax1.set_ylabel('Value (USD)', fontsize=11)
     ax1.grid(alpha=0.3, linestyle='--')
 
-    # Secondary axis for return %
+    # Secondary axis for time-weighted return %
     ax1b = ax1.twinx()
-    ax1b.step(dates, data['return_pct'], '--', color='green', label='Total Portfolio Return %', linewidth=2, alpha=0.7, where='post')
-    ax1b.set_ylabel('Total Portfolio Return % (TWR)', fontsize=11, color='green')
+    ax1b.step(dates, data['twr_pct'], '--', color='green', label='Time-Weighted Return %', linewidth=2, alpha=0.7, where='post')
+    ax1b.set_ylabel('Time-Weighted Return % (TWR)', fontsize=11, color='green')
     ax1b.tick_params(axis='y', labelcolor='green')
 
     # Legend with buy/sell markers
@@ -78,9 +83,9 @@ def plot_portfolio_performance(portfolio_history, transactions):
     ax2.grid(alpha=0.3, linestyle='--')
 
     ax2b = ax2.twinx()
-    ax2b.step(dates, data['dividends'], ':', color='orange', label='Cumulative Dividends',
+    ax2b.step(dates, data['dividends'], ':', color='orange', label='Cumulative Dividends (gross)',
              linewidth=2, alpha=0.8, where='post')
-    ax2b.set_ylabel('Cumulative Dividends (USD)', fontsize=11, color='orange')
+    ax2b.set_ylabel('Cumulative Gross Dividends (USD)', fontsize=11, color='orange')
     ax2b.tick_params(axis='y', labelcolor='orange')
 
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -113,7 +118,7 @@ def plot_portfolio_performance(portfolio_history, transactions):
     plt.show()
 
 
-def print_portfolio_summary(transactions, positions, portfolio_history):
+def print_portfolio_summary(transactions, positions, portfolio_history, mode='full'):
     """
     Print comprehensive portfolio summary with mathematical formulas for each metric.
 
@@ -121,7 +126,14 @@ def print_portfolio_summary(transactions, positions, portfolio_history):
         transactions (pl.DataFrame): DataFrame from load_transactions()
         positions (pl.DataFrame): DataFrame from load_positions()
         portfolio_history (pl.DataFrame): DataFrame from calculate_portfolio_metrics()
+        mode (str): 'full' for the since-inception summary, 'annual' for a breakdown by
+            calendar year (Jan 1 - Dec 31) with a since-inception 'Total' column
     """
+    if mode == 'annual':
+        return _print_annual_summary(transactions, portfolio_history)
+    if mode != 'full':
+        raise ValueError(f"mode must be 'full' or 'annual', got {mode!r}")
+
     def fmt_num(val, decimal=2, prefix='', na_str='N/A'):
         """Helper to format numeric values, handling None gracefully."""
         if val is None:
@@ -134,57 +146,59 @@ def print_portfolio_summary(transactions, positions, portfolio_history):
             return na_str
         return f"{val:.{decimal}f}%"
 
-    # Aggregate dividends, taxes, and commissions by symbol
-    div_agg = transactions.filter(pl.col('type') == 'Dividend').group_by('symbol').agg(
-        pl.col('amount').sum().alias('total_dividends'))
-    tax_agg = transactions.filter(pl.col('type') == 'Tax').group_by('symbol').agg(
-        pl.col('amount').sum().alias('withholding_tax'))
-    comm_agg = transactions.filter(pl.col('type') == 'Trade').group_by('symbol').agg(
-        pl.col('commission').sum().alias('commissions'))
+    def by_type(kind):
+        return transactions.filter(pl.col('type') == kind)
+
+    final = portfolio_history.row(-1, named=True)
+    fx_rate = final['fx_rate']
+
+    # Aggregate dividends and taxes by symbol (per-holding table only)
+    div_agg = by_type('Dividend').group_by('symbol').agg(pl.col('amount').sum().alias('total_dividends'))
+    tax_agg = by_type('Tax').group_by('symbol').agg(pl.col('amount').sum().alias('withholding_tax'))
+
+    # Table weights use the statement's market values plus current cash
+    holdings_mv = positions['market_value'].sum() or 0
+    table_total = holdings_mv + final['cash']
 
     # Build enriched holdings summary
     summary = (positions
         .join(div_agg, on='symbol', how='left')
         .join(tax_agg, on='symbol', how='left')
-        .join(comm_agg, on='symbol', how='left')
         .with_columns([
             pl.col('total_dividends').fill_null(0),
             pl.col('withholding_tax').fill_null(0),
-            pl.col('commissions').fill_null(0),
             (pl.col('cost_basis') / pl.col('shares')).alias('avg_price'),
-            ((pl.col('current_price') - pl.col('cost_basis') / pl.col('shares')) /
-             (pl.col('cost_basis') / pl.col('shares')) * 100).alias('price_change_pct'),
-            (pl.col('market_value') / pl.col('market_value').sum().over(pl.lit(1)) * 100).alias('portfolio_weight_pct'),
+            (pl.col('market_value') / table_total * 100).alias('portfolio_weight_pct'),
+            (pl.col('market_value') / holdings_mv * 100).alias('asset_weight_pct'),
             (pl.col('total_dividends') + pl.col('withholding_tax')).alias('net_dividends'),
             ((pl.col('unrealized_pnl') + pl.col('total_dividends') + pl.col('withholding_tax')) /
              pl.col('cost_basis') * 100).alias('total_return_pct')
         ])
     )
 
-    final = portfolio_history.row(-1, named=True)
+    # Account-wide totals cover all transactions, including closed positions
+    total_commissions = by_type('Trade')['commission'].sum()
+    gross_dividends = final['dividends']
+    total_withholding_tax = final['withholding_tax']
+    total_fees = final['fees']
+    fx_pnl = final['fx_pnl']
 
-    # Calculate costs
-    total_commissions = summary['commissions'].sum()
-    total_withholding_tax = abs(summary['withholding_tax'].sum())
-    total_fees = abs(transactions.filter(pl.col('type') == 'Fee')['amount'].sum())
-    total_costs = total_commissions + total_withholding_tax + total_fees
-
-    # Calculate dividends
-    gross_dividends = summary['total_dividends'].sum()
-    net_dividends = summary['net_dividends'].sum()
-
-    # Calculate time-weighted return (TWR)
+    # Returns
     start_date = portfolio_history['date'].min()
     end_date = portfolio_history['date'].max()
     days_invested = (end_date - start_date).days
     years_invested = days_invested / 365.25
 
-    total_return = (final['equity'] / final['contributed']) - 1
-    annualized_twr = ((1 + total_return) ** (1 / years_invested) - 1) * 100 if years_invested > 0 else 0
+    def annualize(total_pct):
+        return ((1 + total_pct / 100) ** (1 / years_invested) - 1) * 100 if years_invested > 0 else 0
 
-    # Calculate cash weight and asset distribution (excluding cash)
+    twr_annualized = annualize(final['twr_pct'])
+    usd_xirr = money_weighted_return(portfolio_history, 'equity', 'contributed')
+    jpy_xirr = money_weighted_return(portfolio_history, 'equity_jpy', 'deposited_jpy')
+    pct_or_na = lambda rate: fmt_pct(rate * 100 if rate is not None else None)
+
     cash_weight = (final['cash'] / final['equity'] * 100) if final['equity'] else 0
-    total_holdings_value = summary['market_value'].sum() or 0
+    as_of = positions['as_of'][0] if 'as_of' in positions.columns and positions.height else None
 
     print("\n" + "=" * 120)
     print("INVESTMENT TIMELINE")
@@ -192,18 +206,19 @@ def print_portfolio_summary(transactions, positions, portfolio_history):
     print(f"Start Date:                              {start_date}")
     print(f"End Date:                                {end_date}")
     print(f"Days Invested:                           {days_invested} days ({years_invested:.2f} years)")
-    print(f"First Deposit:                           {transactions.filter(pl.col('type') == 'Deposit')['date'].min()}")
-    print(f"Number of Deposits:                      {transactions.filter(pl.col('type') == 'Deposit').height}")
+    print(f"First Deposit:                           {by_type('Deposit')['date'].min()}")
+    print(f"Number of Deposits:                      {by_type('Deposit').height}")
 
     print("\n" + "=" * 120)
     print("ASSET ALLOCATION & PERFORMANCE")
     print("=" * 120)
+    if as_of:
+        print(f"Prices from IBKR statement as of {as_of}; cash from transaction history.")
     print(f"\n{'Symbol':<8} {'Shares':<10} {'Avg$':<10} {'Curr$':<10} {'Cost Basis':<13} {'Market Val':<13} "
-          f"{'Port%':<9} {'Asset%':<9} {'Unrealized':<13} {'Divs':<10} {'Ret%':<8}")
+          f"{'Port%':<9} {'Asset%':<9} {'Unrealized':<13} {'Net Divs':<10} {'Ret%':<8}")
     print("-" * 120)
 
     for row in summary.sort('portfolio_weight_pct', descending=True).iter_rows(named=True):
-        asset_distribution = (row['market_value'] / total_holdings_value * 100) if row['market_value'] is not None and total_holdings_value else None
         print(f"{row['symbol']:<8} "
               f"{fmt_num(row['shares'], 2, ''):<10} "
               f"{fmt_num(row['avg_price'], 2, '$'):<10} "
@@ -211,52 +226,49 @@ def print_portfolio_summary(transactions, positions, portfolio_history):
               f"{fmt_num(row['cost_basis'], 2, '$'):<13} "
               f"{fmt_num(row['market_value'], 2, '$'):<13} "
               f"{fmt_pct(row['portfolio_weight_pct'], 2):<9} "
-              f"{fmt_pct(asset_distribution, 2):<9} "
+              f"{fmt_pct(row['asset_weight_pct'], 2):<9} "
               f"{fmt_num(row['unrealized_pnl'], 2, '$'):<13} "
               f"{fmt_num(row['net_dividends'], 2, '$'):<10} "
               f"{fmt_pct(row['total_return_pct'], 2):<8}")
 
     # Add cash row
-    print(f"{'Cash':<8} {'-':<10} {'-':<10} {'-':<10} {'-':<13} ${final['cash']:<12,.2f} {cash_weight:<8.2f}% "
-          f"{'-':<9} {'-':<13} {'-':<10} {'-':<8}")
+    print(f"{'Cash':<8} {'-':<10} {'-':<10} {'-':<10} {'-':<13} {fmt_num(final['cash'], 2, '$'):<13} "
+          f"{fmt_pct(final['cash'] / table_total * 100):<9} {'-':<9} {'-':<13} {'-':<10} {'-':<8}")
 
     print("-" * 120)
     cost_basis_sum = summary['cost_basis'].sum() or 0
-    total_asset_return = ((summary['unrealized_pnl'].sum() + net_dividends) / cost_basis_sum * 100) if cost_basis_sum else 0
-    print(f"{'TOTAL':<8} {'':<10} {'':<10} {'':<10} ${summary['cost_basis'].sum():<12,.2f} "
-          f"${final['equity']:<12,.2f} {100.00:<8.2f}% {100.00:<8.2f}% "
-          f"${summary['unrealized_pnl'].sum():<12,.2f} ${net_dividends:<9,.2f} {total_asset_return:<7.2f}%")
+    table_net_dividends = summary['net_dividends'].sum()
+    total_asset_return = ((summary['unrealized_pnl'].sum() + table_net_dividends) / cost_basis_sum * 100) if cost_basis_sum else 0
+    print(f"{'TOTAL':<8} {'':<10} {'':<10} {'':<10} {fmt_num(cost_basis_sum, 2, '$'):<13} "
+          f"{fmt_num(table_total, 2, '$'):<13} {fmt_pct(100):<9} {fmt_pct(100):<9} "
+          f"{fmt_num(summary['unrealized_pnl'].sum(), 2, '$'):<13} {fmt_num(table_net_dividends, 2, '$'):<10} "
+          f"{fmt_pct(total_asset_return):<8}")
 
-    print(f"\nNote: 'Ret%' = (Unrealized P&L + Dividends) / Cost Basis × 100")
+    print(f"\nNote: 'Ret%' = (Unrealized P&L + Net Dividends) / Cost Basis × 100")
+    print(f"      'Port%' = share of holdings + cash, 'Asset%' = share of holdings only.")
     print(f"      Returns on current holdings only, excluding realized gains from closed positions.")
 
     print("\n" + "=" * 120)
     print("PORTFOLIO CAPITAL STRUCTURE")
     print("=" * 120)
 
-    # Calculate what JPY would be worth today vs what was actually received
-    # Get JPY deposits and most recent FX rate from transactions
-    jpy_deposits = transactions.filter((pl.col('type') == 'Deposit') & (pl.col('currency') == 'JPY'))
-    total_jpy_deposited = jpy_deposits['amount'].sum()
-
-    fx_txns = transactions.filter((pl.col('type') == 'FX') & (pl.col('quantity') != 0))
-    if fx_txns.height > 0 and total_jpy_deposited > 0:
-        last_fx = fx_txns.sort('date').tail(1).row(0, named=True)
-        current_fx_rate = abs(last_fx['amount']) / abs(last_fx['quantity'])
-        jpy_value_today = total_jpy_deposited / current_fx_rate
-        fx_gain = final['contributed'] - jpy_value_today
+    # Deposits are valued on their deposit day; what the yen actually became in USD differs by FX P&L
+    total_jpy_deposited = by_type('Deposit').filter(pl.col('currency') == 'JPY')['amount'].sum()
+    if total_jpy_deposited > 0:
+        usd_obtained = final['contributed'] + fx_pnl
+        jpy_value_today = total_jpy_deposited / fx_rate
+        vs_today = usd_obtained - jpy_value_today
 
         print(f"JPY Deposits Total:                      ¥{total_jpy_deposited:>12,.0f}")
-        print(f"  Value if converted today (¥{current_fx_rate:.2f}): ${jpy_value_today:>12,.2f}")
-        print(f"  Actual USD received:                   ${final['contributed']:>12,.2f}")
-        if fx_gain > 0:
-            print(f"  FX Timing Gain:                        ${fx_gain:>12,.2f}  = (Better conversion timing)")
-        else:
-            print(f"  FX Timing Loss:                        ${fx_gain:>12,.2f}  = (Worse conversion timing)")
+        print(f"  Value on deposit days:                 ${final['contributed']:>12,.2f}  = Σ(Deposit / USDJPY on deposit day)")
+        print(f"  USD obtained (converted + yen left):   ${usd_obtained:>12,.2f}  = Actual conversions + unconverted yen today")
+        print(f"  FX Gain/Loss (FX):                     ${fx_pnl:>12,.2f}  = USD obtained - Value on deposit days")
+        print(f"  Value if converted today (¥{fx_rate:.2f}): ${jpy_value_today:>12,.2f}  [{'gained' if vs_today > 0 else 'lost'} "
+              f"${abs(vs_today):,.2f} vs. converting today]")
     print(f"{'-' * 120}")
-    print(f"Contributed Capital (C):                 ${final['contributed']:>12,.2f}  = Actual USD from deposits/conversions")
+    print(f"Contributed Capital (C):                 ${final['contributed']:>12,.2f}  = Σ(Deposits valued on deposit day)")
     print(f"Invested Capital (I):                    ${final['invested_capital']:>12,.2f}  = Σ(Cost Basis inc. buy commissions)")
-    print(f"Cash (K):                                ${final['cash']:>12,.2f}  = C - I + R_cap + D_gross - T_div - T_fees")
+    print(f"Cash (K):                                ${final['cash']:>12,.2f}  = C - I + R_cap + D_gross - T_div - T_fees + FX")
     print(f"Holdings Market Value (H):               ${final['holdings_value']:>12,.2f}  = Σ(Shares × Current Price)")
     print(f"{'-' * 120}")
     print(f"Total Equity (E):                        ${final['equity']:>12,.2f}  = K + H")
@@ -288,35 +300,174 @@ def print_portfolio_summary(transactions, positions, portfolio_history):
     print("TOTAL INVESTMENT PERFORMANCE")
     print("=" * 120)
 
-    # Calculate correct net investment P&L
-    net_investment_pnl = final['unrealized_pnl'] + final['realized_pnl'] + gross_dividends - total_withholding_tax - total_fees
+    net_investment_pnl = (final['unrealized_pnl'] + final['realized_pnl'] + gross_dividends
+                          - total_withholding_tax - total_fees + fx_pnl)
+    reconciliation_gap = net_investment_pnl - final['portfolio_pnl']
 
     print(f"Unrealized Gains:                        ${final['unrealized_pnl']:>12,.2f}")
     print(f"Realized Gains (net of commissions):     ${final['realized_pnl']:>12,.2f}")
     print(f"Gross Dividends:                         ${gross_dividends:>12,.2f}")
     print(f"Less: Withholding Tax & Fees:            ${total_withholding_tax + total_fees:>12,.2f}")
+    print(f"FX Gain/Loss:                            ${fx_pnl:>12,.2f}")
     print(f"{'-' * 120}")
-    print(f"Net Investment P&L:                      ${net_investment_pnl:>12,.2f}  = U + R_cap + D_gross - T_div - T_fees")
+    print(f"Net Investment P&L:                      ${net_investment_pnl:>12,.2f}  = U + R_cap + D_gross - T_div - T_fees + FX")
+    status = "OK" if abs(reconciliation_gap) < 0.01 else "MISMATCH - check transactions"
+    print(f"Reconciliation vs Portfolio P&L (E - C): ${reconciliation_gap:>12,.2f}  [{status}]")
     print(f"{'-' * 120}")
-    print(f"Total Portfolio Return (TWR):            {final['return_pct']:>11,.2f}%  = (E / C - 1) × 100")
-    print(f"                                                       [Total return on all contributed capital]")
-    print(f"Annualized TWR:                          {annualized_twr:>11,.2f}%  = [(1 + TWR)^(1/years) - 1] × 100")
+    print(f"Simple Return on Contributed:            {final['simple_return_pct']:>11,.2f}%  = (E / C - 1) × 100")
+    print(f"Time-Weighted Return (TWR):              {final['twr_pct']:>11,.2f}%  = Π(1 + daily return) - 1, deposits removed")
+    print(f"Annualized TWR:                          {twr_annualized:>11,.2f}%  = [(1 + TWR)^(1/years) - 1] × 100")
+    print(f"Money-Weighted Return (XIRR, USD):       {pct_or_na(usd_xirr):>12}  = annual rate on your actual deposit timing")
+
+    print("\n" + "=" * 120)
+    print("JPY PERSPECTIVE")
+    print("=" * 120)
+    print(f"USD/JPY (latest market close):           ¥{fx_rate:>12,.2f}")
+    print(f"Total Deposited (JPY):                   ¥{final['deposited_jpy']:>12,.0f}")
+    print(f"Portfolio Value (JPY):                   ¥{final['equity_jpy']:>12,.0f}  = E × USD/JPY")
+    print(f"Portfolio P&L (JPY):                     ¥{final['equity_jpy'] - final['deposited_jpy']:>12,.0f}")
+    jpy_return = (final['equity_jpy'] / final['deposited_jpy'] - 1) * 100 if final['deposited_jpy'] else None
+    print(f"Simple Return (JPY):                     {fmt_pct(jpy_return):>12}  = (E_jpy / Deposits_jpy - 1) × 100")
+    print(f"Money-Weighted Return (XIRR, JPY):       {pct_or_na(jpy_xirr):>12}")
 
     print("\n" + "=" * 120)
     print("SUMMARY")
     print("=" * 120)
-    print(f"Total Capital Contributed:               ${final['contributed']:>12,.2f}  (Actual USD from deposits/FX)")
-    if fx_txns.height > 0 and total_jpy_deposited > 0:
-        if fx_gain > 0:
-            print(f"  Note: Deposited ¥{total_jpy_deposited:,.0f}, gained ${fx_gain:,.2f} vs. converting today")
-        else:
-            print(f"  Note: Deposited ¥{total_jpy_deposited:,.0f}, lost ${abs(fx_gain):,.2f} vs. converting today")
-    print(f"Current Portfolio Value:                 ${final['equity']:>12,.2f}")
-    print(f"Net Investment Gain:                     ${net_investment_pnl:>12,.2f}  ({final['return_pct']:.2f}% return)")
+    print(f"Total Capital Contributed:               ${final['contributed']:>12,.2f}  (Deposits valued on deposit day)")
+    if total_jpy_deposited > 0:
+        print(f"  Note: Deposited ¥{total_jpy_deposited:,.0f}, {'gained' if vs_today > 0 else 'lost'} "
+              f"${abs(vs_today):,.2f} vs. converting today")
+    print(f"Current Portfolio Value:                 ${final['equity']:>12,.2f}  (¥{final['equity_jpy']:,.0f})")
+    print(f"Net Investment Gain:                     ${net_investment_pnl:>12,.2f}  ({final['simple_return_pct']:.2f}% on contributed capital)")
     print(f"  - Realized (after commissions):        ${final['realized_pnl'] + gross_dividends - total_withholding_tax - total_fees:>12,.2f}")
     print(f"  - Unrealized (Paper Gains):            ${final['unrealized_pnl']:>12,.2f}")
+    print(f"  - FX Gain/Loss:                        ${fx_pnl:>12,.2f}")
     print(f"Total External Costs (taxes + fees):     ${total_withholding_tax + total_fees:>12,.2f}")
     print(f"Total Commissions (embedded in above):   ${total_commissions:>12,.2f}")
-    print(f"Annualized Return:                       {annualized_twr:.2f}% per year over {years_invested:.2f} years")
+    print(f"Annualized Return:                       {twr_annualized:.2f}% TWR, {pct_or_na(usd_xirr)} XIRR (USD), "
+          f"{pct_or_na(jpy_xirr)} XIRR (JPY) over {years_invested:.2f} years")
     print(f"Current Allocation:                      {(final['holdings_value']/final['equity']*100):.1f}% equities, {cash_weight:.1f}% cash")
     print("=" * 120)
+
+
+def _print_annual_summary(transactions, portfolio_history):
+    """
+    Print the portfolio summary broken down by calendar year (Jan 1 - Dec 31).
+
+    Each year is measured from the previous year-end valuation, so years add up to the 'Total'
+    (since inception) column. Years not fully covered by the history are marked with '*'.
+    """
+    history = portfolio_history.with_columns(pl.col('date').dt.year().alias('year'))
+    symbols = [c[:-len('_value')] for c in history.columns if c.endswith('_value') and c != 'holdings_value']
+
+    def period_stats(rows):
+        """Metrics for `rows`, measured from the valuation on the day before it starts."""
+        first_date = rows['date'][0]
+        prior = history.filter(pl.col('date') < first_date).tail(1)
+        start = prior.row(0, named=True) if prior.height else None
+        end = rows.row(-1, named=True)
+        change = lambda key: end[key] - (start[key] if start else 0.0)
+        days = (end['date'] - (start['date'] if start else first_date)).days
+
+        # Money-weighted return: the starting value is treated as the first contribution
+        before = lambda key: start[key] if start else 0.0
+        window = prior.vstack(rows).with_columns(
+            (pl.col('contributed') - before('contributed') + before('equity')).alias('usd_basis'),
+            (pl.col('deposited_jpy') - before('deposited_jpy') + before('equity_jpy')).alias('jpy_basis'))
+
+        def period_mwr(value_col, basis_col):
+            rate = money_weighted_return(window, value_col, basis_col)
+            return ((1 + rate) ** (days / 365.25) - 1) * 100 if rate is not None else None
+
+        trades = transactions.filter((pl.col('type') == 'Trade') &
+                                     (pl.col('date') >= first_date) & (pl.col('date') <= end['date']))
+        stats = {
+            'from': first_date, 'to': end['date'], 'days': days,
+            'start_equity': before('equity'), 'deposits': change('contributed'),
+            'pnl': change('portfolio_pnl'), 'end_equity': end['equity'],
+            'unrealized': change('unrealized_pnl'), 'realized': change('realized_pnl'),
+            'dividends': change('dividends'), 'tax': -change('withholding_tax'), 'fees': -change('fees'),
+            'fx': change('fx_pnl'), 'commissions': trades['commission'].sum(),
+            'twr': ((1 + end['twr_pct'] / 100) / (1 + before('twr_pct') / 100) - 1) * 100,
+            'mwr': period_mwr('equity', 'usd_basis'),
+            'fx_rate': end['fx_rate'],
+            'start_equity_jpy': before('equity_jpy'), 'deposits_jpy': change('deposited_jpy'),
+            'pnl_jpy': change('equity_jpy') - change('deposited_jpy'), 'end_equity_jpy': end['equity_jpy'],
+            'mwr_jpy': period_mwr('equity_jpy', 'jpy_basis'),
+            'cash_pct': end['cash'] / end['equity'] * 100 if end['equity'] else None,
+        }
+        stats['gap'] = stats['pnl'] - sum(stats[k] for k in ['unrealized', 'realized', 'dividends', 'tax', 'fees', 'fx'])
+        for sym in symbols:
+            stats[f'{sym}_pct'] = end[f'{sym}_value'] / end['equity'] * 100 if end['equity'] else None
+        return stats
+
+    columns = []
+    for year in history['year'].unique().sort().to_list():
+        rows = history.filter(pl.col('year') == year)
+        first, last = rows['date'][0], rows['date'][-1]
+        full_year = (first.month, first.day, last.month, last.day) == (1, 1, 12, 31)
+        columns.append((str(year) if full_year else f"{year}*", period_stats(rows)))
+    columns.append(('Total', period_stats(history)))
+
+    def signed(symbol, decimals):
+        def fmt(v):
+            v = round(v, decimals) + 0.0  # + 0.0 turns -0.00 into 0.00
+            return f"{'-' if v < 0 else ''}{symbol}{abs(v):,.{decimals}f}"
+        return fmt
+    usd, jpy = signed('$', 2), signed('¥', 0)
+    pct = lambda v: f"{v:.2f}%" if v is not None else 'N/A'
+
+    label_width, col_width = 38, 14
+    width = label_width + col_width * len(columns)
+
+    def line(label, key=None, fmt=str, values=None):
+        cells = values if values is not None else [fmt(stats[key]) for _, stats in columns]
+        print(f"{label:<{label_width}}" + "".join(f"{c:>{col_width}}" for c in cells))
+
+    print("=" * width)
+    line("ANNUAL PORTFOLIO SUMMARY", values=[label for label, _ in columns])
+    line("  From", 'from')
+    line("  To", 'to')
+    line("  Days", 'days')
+    print("=" * width)
+
+    print("CAPITAL (USD)")
+    line("  Starting value", 'start_equity', usd)
+    line("  + Deposits", 'deposits', usd)
+    line("  + Portfolio P&L", 'pnl', usd)
+    line("  = Ending value", 'end_equity', usd)
+
+    print("\nP&L BREAKDOWN (USD)")
+    line("  Change in unrealized gains", 'unrealized', usd)
+    line("  Realized gains", 'realized', usd)
+    line("  Dividends (gross)", 'dividends', usd)
+    line("  Withholding tax", 'tax', usd)
+    line("  Account fees", 'fees', usd)
+    line("  FX gain/loss on deposited yen", 'fx', usd)
+    line("  = Portfolio P&L", 'pnl', usd)
+    line("  Commissions (already included above)", 'commissions', usd)
+
+    print("\nRETURNS (for the period, not annualized)")
+    line("  Time-weighted (TWR)", 'twr', pct)
+    line("  Money-weighted (MWR, USD)", 'mwr', pct)
+    line("  Money-weighted (MWR, JPY)", 'mwr_jpy', pct)
+
+    print("\nCAPITAL (JPY)")
+    line("  USD/JPY at period end", 'fx_rate', lambda v: f"¥{v:,.2f}")
+    line("  Starting value", 'start_equity_jpy', jpy)
+    line("  + Deposits", 'deposits_jpy', jpy)
+    line("  + Portfolio P&L", 'pnl_jpy', jpy)
+    line("  = Ending value", 'end_equity_jpy', jpy)
+
+    print("\nALLOCATION AT PERIOD END (% of total value)")
+    held = [sym for sym in symbols if any(stats[f'{sym}_pct'] for _, stats in columns)]
+    for sym in sorted(held, key=lambda s: columns[-1][1][f'{s}_pct'] or 0, reverse=True):
+        line(f"  {sym}", f'{sym}_pct', pct)
+    line("  Cash", 'cash_pct', pct)
+
+    print("=" * width)
+    print("* Partial year. Each year starts from the previous year-end value, so the years add up to Total.")
+    print("  Deposits are valued in USD on their deposit day; later exchange-rate moves are FX gain/loss.")
+    mismatched = [label for label, stats in columns if abs(stats['gap']) >= 0.01]
+    if mismatched:
+        print(f"  WARNING: P&L breakdown does not add up for {', '.join(mismatched)} - check transactions.")
